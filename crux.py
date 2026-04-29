@@ -1231,7 +1231,7 @@ class CruxApp(App):
         
         has_genre_match = len(broad) > 5
         candidates = ""
-        for i, s in enumerate(all_candidates[:120]):
+        for i, s in enumerate(all_candidates[:80]):
             tags = (s.get("tags") or [])
             feats_dict = {
                 "duration_ms": s.get("duration_ms", 0),
@@ -1245,17 +1245,24 @@ class CruxApp(App):
             char = describe_audio(feats_dict)
             tag_str = ' '.join(tags[:4])
             machine = s.get('machine') or ''
-            candidates += f"{s['id']}: {s['name']} | {tag_str} | {machine} | {char}\n"
+            folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
+            candidates += f"{s['id']}: {s['name']} | [{folder}] | {tag_str} | {machine} | {char}\n"
         
+        # Per-slot spectral guidance for the LLM
+        slot_guide = {
+            0: "Kick — expect low centroid (<1500Hz), high RMS (loud), sharp onset, percussive, very short",
+            1: "Snare — medium centroid (1500-3000Hz), moderate RMS, sharp onset, noise-tinged flatness",
+            2: "Hat — high centroid (>2500Hz), low-moderate RMS, very short, noisy flatness",
+            3: "Clap — mid-high centroid, moderate RMS, sharp onset, noise burst, short decay",
+            4: "Perc — varies widely, look for short hits with distinct character",
+        }
         slot_spec = ', '.join(f"{i}={SLOT_NAMES[i] if i < len(SLOT_NAMES) else f'Slot{i+1}'}" for i in range(KIT_SLOTS))
+        slot_guide_str = '\n'.join(f"Slot {k}: {v}" for k, v in slot_guide.items() if k < KIT_SLOTS)
         
-        if has_genre_match:
-            context_note = f'Genre-matched candidates for "{search_query}"'
-        else:
-            context_note = f'No exact genre matches for "{search_query}" — using diverse unlabeled samples. Curate a cohesive {search_query} kit from what\'s available, picking the closest drum sounds for each slot.'
+        context_note = f'Genre-matched' if has_genre_match else 'No exact genre matches — using diverse samples'
         
-        sys_msg = {'role': 'system', 'content': f'You are crüx, a sample curation engine for music producers. Library: {stats["total"]} samples, {stats["tagged"]} tagged. {context_note}'}
-        user_msg = {'role': 'user', 'content': f'User request: "{prompt}"\nCANDIDATES ({len(all_candidates)}):\n{candidates}\nSLOTS: {slot_spec}\nAssign each slot the best match. JSON: {{"action":"kit","slots":[{{"slot":0,"sampleId":"id"}},...],"name":"..."}}. If no perfect match, pick closest. Return ONLY JSON.'}
+        sys_msg = {'role': 'system', 'content': f'You are crüx, a sample curator. Use spectral audio features to match samples to slots. {context_note}.'}
+        user_msg = {'role': 'user', 'content': f'Request: "{prompt}"\n\nSLOT GUIDE (spectral expectations):\n{slot_guide_str}\n\nSLOTS: {slot_spec}\n\nCANDIDATES ({len(all_candidates)}):\n{candidates}\n\nFor each slot, pick the candidate whose spectral character best matches the slot type. Return JSON: {{"action":"kit","slots":[{{"slot":0,"sampleId":"id"}},...],"name":"..."}}. Prefer spectral match over filename. Return ONLY JSON.'}
         
         resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1000)
         if not resp:
@@ -1409,8 +1416,8 @@ class CruxApp(App):
             else:
                 kit_str += f"{i}:{lock}{label}=— "
         
-        sys_msg = {"role": "system", "content": "You are crüx, a sample curation engine. Respond in JSON only."}
-        user_msg = {"role": "user", "content": f"Refine direction: \"{direction}\"\n\nCurrent kit:\n{kit_str}\n\nUnlocked slots: {unlocked}\n\nCandidates:\n{cand_str}\n\nFor each unlocked slot, pick the best matching sample from candidates. Return: {{\"reassignments\":[{{\"slotIndex\":0,\"sampleId\":\"id\",\"reason\":\"...\"}}]}}"}
+        sys_msg = {'role': 'system', 'content': 'You are crüx, a sample curation engine. Use spectral features to guide slot matching.'}
+        user_msg = {'role': 'user', 'content': f'Refine: "{direction}"\nKit: {kit_str}\nUnlocked: {unlocked}\nCandidates:\n{cand_str}\nRebalance unlocked slots using spectral character. Return JSON: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}}]}}'}
         
         resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1000)
         if not resp:
