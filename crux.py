@@ -656,7 +656,7 @@ class SettingsScreen(Screen):
                   placeholder="~/Music/Samples"),
             Static("Theme", classes="slbl"),
             Select(
-                [(t, t.capitalize()) for t in ("shark", "amber", "matrix", "paper")],
+                [(t.capitalize(), t) for t in ("shark", "amber", "matrix", "paper")],
                 prompt="Theme",
                 value={"default": "shark"}.get(self.cfg.get("ui",{}).get("theme","shark"), self.cfg.get("ui",{}).get("theme","shark")),
                 id="s-theme",
