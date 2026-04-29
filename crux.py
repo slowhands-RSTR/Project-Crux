@@ -1262,9 +1262,9 @@ class CruxApp(App):
         context_note = f'Genre-matched' if has_genre_match else 'No exact genre matches — using diverse samples'
         
         sys_msg = {'role': 'system', 'content': f'You are crüx, a sample curator. Use spectral audio features to match samples to slots. {context_note}.'}
-        user_msg = {'role': 'user', 'content': f'Request: "{prompt}"\n\nSLOT GUIDE (spectral expectations):\n{slot_guide_str}\n\nSLOTS: {slot_spec}\n\nCANDIDATES ({len(all_candidates)}):\n{candidates}\n\nFor each slot, pick the candidate whose spectral character best matches the slot type. Return JSON: {{"action":"kit","slots":[{{"slot":0,"sampleId":"id"}},...],"name":"..."}}. Prefer spectral match over filename. Return ONLY JSON.'}
+        user_msg = {'role': 'user', 'content': f'Request: "{prompt}"\n\nSLOT GUIDE (spectral expectations):\n{slot_guide_str}\n\nAll slots: {slot_spec}\n\nCANDIDATES ({len(all_candidates)}):\n{candidates}\n\nAssign EVERY slot (0 through {KIT_SLOTS-1}) the best matching candidate. Fill ALL {KIT_SLOTS} slots — leave none empty. Use spectral character to match each slot type. JSON: {{"action":"kit","slots":[{{"slot":0,"sampleId":"id"}},{{"slot":1,"sampleId":"id"}}...ALL {KIT_SLOTS} SLOTS],"name":"..."}}. Return ONLY JSON with exactly {KIT_SLOTS} slot entries.'}
         
-        resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1000)
+        resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1500)
         if not resp:
             self.set_status("LM Studio offline — start it for LLM commands")
             return
@@ -1417,9 +1417,9 @@ class CruxApp(App):
                 kit_str += f"{i}:{lock}{label}=— "
         
         sys_msg = {'role': 'system', 'content': 'You are crüx, a sample curation engine. Use spectral features to guide slot matching.'}
-        user_msg = {'role': 'user', 'content': f'Refine: "{direction}"\nKit: {kit_str}\nUnlocked: {unlocked}\nCandidates:\n{cand_str}\nRebalance unlocked slots using spectral character. Return JSON: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}}]}}'}
+        user_msg = {'role': 'user', 'content': f'Refine "{direction}"\nKit so far: {kit_str}\nUnlocked slots needing refinement: {unlocked}\nCandidates:\n{cand_str}\nReplace the {len(unlocked)} unlocked slots with better matches. Return JSON with exactly {len(unlocked)} entries: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}},...]}}'}
         
-        resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1000)
+        resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1500)
         if not resp:
             self.set_status("LLM offline — can't refine")
             return
