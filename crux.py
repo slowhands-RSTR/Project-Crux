@@ -18,7 +18,7 @@ from typing import Optional
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
-from textual.widgets import Header, Footer, Input, Static, ListView, ListItem, Label, Button, TextArea
+from textual.widgets import Header, Footer, Input, Static, ListView, ListItem, Label, Button, TextArea, Select
 from textual.binding import Binding
 from textual.screen import Screen, ModalScreen
 from textual.widget import Widget
@@ -654,9 +654,13 @@ class SettingsScreen(Screen):
             Static("Library Path", classes="slbl"),
             Input(value=gen.get("library_path", ""), id="s-lib",
                   placeholder="~/Music/Samples"),
-            Static("Theme (shark / amber / matrix / paper)", classes="slbl"),
-            Input(value=self.cfg.get("ui",{}).get("theme","shark"), id="s-theme",
-                  placeholder="shark"),
+            Static("Theme", classes="slbl"),
+            Select(
+                [(t, t.capitalize()) for t in ("shark", "amber", "matrix", "paper")],
+                prompt="Theme",
+                value=self.cfg.get("ui",{}).get("theme","shark"),
+                id="s-theme",
+            ),
             Static("", id="s-result"),
             Horizontal(
                 Button("Test", id="s-test"),
@@ -762,7 +766,7 @@ class SettingsScreen(Screen):
         llm["model"] = self.query_one("#s-model", Input).value.strip()
         llm["api_key"] = self.query_one("#s-key", Input).value.strip()
         self.cfg.setdefault("general", {})["library_path"] = self.query_one("#s-lib", Input).value.strip()
-        self.cfg.setdefault("ui", {})["theme"] = self.query_one("#s-theme", Input).value.strip()
+        self.cfg.setdefault("ui", {})["theme"] = self.query_one("#s-theme", Select).value
         save_config(self.cfg)
         self.dismiss(True)
 
