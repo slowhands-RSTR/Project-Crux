@@ -852,150 +852,149 @@ class ExportScreen(Screen):
 
 # ─── Main App ─────────────────────────────────────────────────────────────────
 class CruxApp(App):
-    CSS = """
-    /* ── Shark Palette ── */
-    Screen { background: #0b1a20; }
+    CSS = f"""
+    Screen {{ background: $bg; }}
 
-    #main-container {
+    #main-container {{
         height: 100%;
         layout: grid;
         grid-size: 1 5;
         grid-rows: auto auto auto 1fr auto;
-    }
-    #header-bar {
+    }}
+    #header-bar {{
         height: 2;
-        background: #0f2128;
+        background: $surface;
         padding: 0 1;
         content-align: center middle;
-    }
-    #header-bar > Static {
-        color: #1a9e9e;
+    }}
+    #header-bar > Static {{
+        color: $accent;
         text-style: bold;
-    }
-    #prompt-bar {
+    }}
+    #prompt-bar {{
         height: 3;
-        background: #0f2128;
+        background: $surface;
         padding: 0 1;
-    }
-    #prompt-input {
-        background: #0b1a20;
-        color: #b8c8c8;
-        border: solid #1a3a45;
+    }}
+    #prompt-input {{
+        background: $bg;
+        color: $fg;
+        border: solid $border;
         padding: 0 1;
-    }
-    #prompt-input:focus {
-        border: solid #1a9e9e;
-    }
-    #content-area {
+    }}
+    #prompt-input:focus {{
+        border: solid $accent;
+    }}
+    #content-area {{
         height: 100%;
         layout: grid;
         grid-size: 2 1;
         grid-columns: 3fr 2fr;
-    }
-    #sample-panel {
-        background: #0b1a20;
-        border-right: solid #1a3a45;
+    }}
+    #sample-panel {{
+        background: $bg;
+        border-right: solid $border;
         height: 100%;
-    }
-    #waveform-bar {
+    }}
+    #waveform-bar {{
         height: 4;
         width: 100%;
-        background: #0b1a20;
-        border-bottom: solid #1a3a45;
-    }
-    #waveform-view {
+        background: $bg;
+        border-bottom: solid $border;
+    }}
+    #waveform-view {{
         height: 100%;
         padding: 0 1;
-        color: #1a9e9e;
+        color: $accent;
         overflow: hidden;
-    }
-    #sample-list {
+    }}
+    #sample-list {{
         height: 100%;
         overflow-y: auto;
-    }
-    #sample-list ListView {
+    }}
+    #sample-list ListView {{
         height: 100%;
         border: none;
         background: transparent;
-    }
-    ListItem {
+    }}
+    ListItem {{
         background: transparent;
         padding: 0 1;
         height: 1;
-    }
-    ListItem:hover { background: #0f2128; }
-    ListItem > Label { color: #b8c8c8; }
-    ListView:focus .list-item--focused {
-        background: rgba(26,158,158,0.15);
-    }
-    #kit-panel {
-        background: #0f2128;
+    }}
+    ListItem:hover {{ background: $hover; }}
+    ListItem > Label {{ color: $fg; }}
+    ListView:focus .list-item--focused {{
+        background: $hover;
+    }}
+    #kit-panel {{
+        background: $surface;
         height: 100%;
         padding: 0 0 0 1;
-    }
-    #kit-grid {
+    }}
+    #kit-grid {{
         height: 100%;
         overflow-y: auto;
-    }
-    #kit-grid ListView {
+    }}
+    #kit-grid ListView {{
         height: 100%;
         border: none;
         background: transparent;
-    }
-    #kit-input {
-        background: #0b1a20;
-        color: #b8c8c8;
-        border: solid #1a3a45;
+    }}
+    #kit-input {{
+        background: $bg;
+        color: $fg;
+        border: solid $border;
         padding: 0 1;
         height: 3;
-    }
-    #kit-input:focus {
-        border: solid #1a9e9e;
-    }
-    #kit-grid ListItem {
+    }}
+    #kit-input:focus {{
+        border: solid $accent;
+    }}
+    #kit-grid ListItem {{
         background: transparent;
-        border-bottom: solid #1a3a45;
+        border-bottom: solid $border;
         height: 2;
         padding: 0;
-    }
-    #kit-grid ListItem > Label { color: #b8c8c8; }
-    .kit-slot { padding: 0 1; }
-    .slot-label { color: #1a9e9e; text-style: bold; min-width: 8; }
-    .slot-name { color: #b8c8c8; }
-    .slot-empty { color: #3a5a65; text-style: italic; }
-    .slot-locked { color: #3a5a65; }
-    #status-bar {
+    }}
+    #kit-grid ListItem > Label {{ color: $fg; }}
+    .kit-slot {{ padding: 0 1; }}
+    .slot-label {{ color: $accent; text-style: bold; min-width: 8; }}
+    .slot-name {{ color: $fg; }}
+    .slot-empty {{ color: $muted; text-style: italic; }}
+    .slot-locked {{ color: $muted; }}
+    #status-bar {{
         height: 1;
-        background: #0f2128;
+        background: $surface;
         padding: 0 1;
-    }
-    #status-bar > Static { color: #3a5a65; }
+    }}
+    #status-bar > Static {{ color: $muted; }}
 
-    Button {
-        background: #152a33;
-        color: #b8c8c8;
-        border: solid #1a3a45;
+    Button {{
+        background: $surface2;
+        color: $fg;
+        border: solid $border;
         min-width: 8;
         height: 2;
-    }
-    Button:hover { border: solid #1a9e9e; }
-    Button:focus { border: solid #1a9e9e; }
-    Button.accent { color: #e0673a; border: solid #7a3a20; }
+    }}
+    Button:hover {{ border: solid $accent; }}
+    Button:focus {{ border: solid $accent; }}
+    Button.accent {{ color: #e0673a; border: solid #7a3a20; }}
 
-    #import-screen { align: center middle; }
-    #import-box { width: 60; height: 20; background: #0f2128; border: solid #1a9e9e; padding: 1 2; }
-    #import-title { color: #1a9e9e; text-style: bold; }
-    #import-status { color: #b8c8c8; height: 1; }
-    #import-log { height: 14; overflow-y: auto; background: #0b1a20; border: solid #1a3a45; padding: 0 1; }
-    #import-log > Static { color: #b8c8c8; }
-    #sample-list, #kit-grid, #import-log {
-        scrollbar-color: #3a5a65;
-        scrollbar-color-hover: #5a7a85;
-    }
-    ListView {
-        scrollbar-color: #3a5a65;
-        scrollbar-color-hover: #5a7a85;
-    }
+    #import-screen {{ align: center middle; }}
+    #import-box {{ width: 60; height: 20; background: $surface; border: solid $accent; padding: 1 2; }}
+    #import-title {{ color: $accent; text-style: bold; }}
+    #import-status {{ color: $fg; height: 1; }}
+    #import-log {{ height: 14; overflow-y: auto; background: $bg; border: solid $border; padding: 0 1; }}
+    #import-log > Static {{ color: $fg; }}
+    #sample-list, #kit-grid, #import-log {{
+        scrollbar-color: $muted;
+        scrollbar-color-hover: $dim;
+    }}
+    ListView {{
+        scrollbar-color: $muted;
+        scrollbar-color-hover: $dim;
+    }}
     """
     
     BINDINGS = [
@@ -1028,8 +1027,29 @@ class CruxApp(App):
         self._kit_index = 0
         self._current_audio: Optional[subprocess.Popen] = None
     
+    def get_css_variables(self) -> dict[str, str]:
+        """Return CSS variables matching the current theme."""
+        base = super().get_css_variables()
+        t = getattr(self, '_theme', None) or {
+            "bg": "#0b1a20", "surface": "#0f2128", "surface2": "#152a33",
+            "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45",
+            "dim": "#5a8a8a", "muted": "#3a5a65", "hover": "#0f2128",
+        }
+        base.update({
+            "bg": t["bg"],
+            "surface": t["surface"],
+            "surface2": t["surface2"],
+            "fg": t["fg"],
+            "accent": t["accent"],
+            "border": t["border"],
+            "dim": t["dim"],
+            "muted": t["muted"],
+            "hover": t["hover"],
+        })
+        return base
+    
     def load_theme(self):
-        """Apply the selected theme from config to all panels via inline styles."""
+        """Apply the selected theme from config."""
         theme = _config.get("ui", {}).get("theme", "default").lower()
         themes = {
             "default": {"bg": "#0b1a20", "surface": "#0f2128", "surface2": "#152a33", "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45", "dim": "#5a8a8a", "muted": "#3a5a65", "hover": "#0f2128"},
@@ -1038,54 +1058,11 @@ class CruxApp(App):
             "matrix":  {"bg": "#000000", "surface": "#0a0a0a", "surface2": "#0a1a0a", "fg": "#00cc00", "accent": "#00ff41", "border": "#003a00", "dim": "#008800", "muted": "#005500", "hover": "#0a1a0a"},
             "paper":   {"bg": "#f5f0e0", "surface": "#ede5d5", "surface2": "#e3d9c7", "fg": "#5c4b37", "accent": "#8b6914", "border": "#cfc0aa", "dim": "#7a6a52", "muted": "#b09878", "hover": "#e3d9c7"},
         }
-        t = themes.get(theme, themes["default"])
-        self._theme = t
-        try:
-            self.screen.styles.background = t["bg"]
-            # Header
-            hdr = self.query_one("#header-bar")
-            hdr.styles.background = t["surface"]
-            hdr.query(Static).first().styles.color = t["accent"]
-            # Prompt bar
-            self.query_one("#prompt-bar").styles.background = t["surface"]
-            pi = self.query_one("#prompt-input")
-            pi.styles.background = t["bg"]
-            pi.styles.color = t["fg"]
-            pi.styles.border = ("solid", t["border"])
-            # Waveform
-            wb = self.query_one("#waveform-bar")
-            wb.styles.background = t["bg"]
-            wb.styles.border_bottom = ("solid", t["border"])
-            self.query_one("#waveform-view").styles.color = t["accent"]
-            # Panels
-            self.query_one("#sample-panel").styles.background = t["bg"]
-            self.query_one("#sample-panel").styles.border_right = ("solid", t["border"])
-            self.query_one("#kit-panel").styles.background = t["surface"]
-            # Kit input (if present)
-            try:
-                ki = self.query_one("#kit-input")
-                ki.styles.background = t["bg"]
-                ki.styles.color = t["fg"]
-                ki.styles.border = ("solid", t["border"])
-            except:
-                pass
-            # Status
-            sb = self.query_one("#status-bar")
-            sb.styles.background = t["surface"]
-            sb.query(Static).first().styles.color = t["dim"]
-            # Re-render lists with new colors
-            self.render_kit()
-            if self._samples:
-                self.search(self._query)
-            # Apply hover/focus CSS rules dynamically for the theme
-            css_overrides = f"""
-            ListItem:hover {{ background: {t['hover']}; }}
-            ListView:focus .list-item--focused {{ background: {t['accent']}26; }}
-            """
-            self.stylesheet.add_source(css_overrides, tie_breaker=10)
-            self.refresh_css()
-        except Exception as e:
-            self.set_status(f"theme error: {e}")
+        self._theme = themes.get(theme, themes["default"])
+        self.refresh_css()
+        self.render_kit()
+        if self._samples:
+            self.search(self._query)
     
     def compose(self):
         yield Container(
