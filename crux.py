@@ -1,0 +1,1400 @@
+#!/usr/bin/env python3
+"""
+crüx — sample curation TUI
+───────────────────────────
+A keyboard-first prompt-driven sample browser + kit builder.
+Powered by FTS5 search + LM Studio for smart curation.
+Shares the SonicVault database (13K+ tagged samples).
+
+Usage:
+  ./crux.py                     # open the TUI
+  ./crux.py import ~/samples/   # import & analyze + LLM-tag a folder
+"""
+
+import sys, os, sqlite3, re, json, subprocess, time, asyncio, uuid
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+from textual import on, work
+from textual.app import App, ComposeResult
+from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
+from textual.widgets import Header, Footer, Input, Static, ListView, ListItem, Label, Button, TextArea
+from textual.binding import Binding
+from textual.screen import Screen, ModalScreen
+from textual.widget import Widget
+from textual.reactive import reactive
+from textual import events
+from textual.message import Message
+from textual.css.query import NoMatches
+
+# ─── Config ──────────────────────────────────────────────────────────────────
+CONFIG_DIR = os.path.expanduser("~/.crux")
+CONFIG_FILE = os.path.join(CONFIG_DIR, "config.toml")
+
+# Provider presets
+PROVIDER_PRESETS = {
+    "lm_studio": {"url": "http://localhost:1234/v1/chat/completions", "model": "gemma-4-26b-a4b-it-mlx"},
+    "ollama":    {"url": "http://localhost:11434/v1/chat/completions", "model": "llama3"},
+    "openai":    {"url": "https://api.openai.com/v1/chat/completions", "model": "gpt-4o-mini"},
+}
+
+def load_config():
+    cfg = {
+        "general": {"db_path": "", "library_path": ""},
+        "llm": {
+            "provider": "lm_studio",
+            "url": "http://localhost:1234/v1/chat/completions",
+            "model": "gemma-4-26b-a4b-it-mlx",
+            "api_key": "",
+        },
+        "import": {"recursive": True, "analyze_bpm": True, "analyze_key": False, "audio_formats": ["wav","mp3","aiff","aif","flac","ogg","m4a"], "tag_batch_size": 3},
+        "ui": {"theme": "shark", "samples_per_page": 200, "kit_slots": 16},
+    }
+    # Parse config.toml manually (Python 3.9 doesn't have tomllib)
+    try:
+        section = None
+        for line in open(CONFIG_FILE):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1].strip()
+                # Map old section names to new
+                if section == "lm_studio":
+                    section = "llm"
+                    if "provider" not in cfg.setdefault("llm", {}):
+                        cfg["llm"]["provider"] = "lm_studio"
+                if section not in cfg:
+                    cfg[section] = {}
+            elif "=" in line and section:
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'").strip()
+                if v.lower() == "true": v = True
+                elif v.lower() == "false": v = False
+                elif v.isdigit(): v = int(v)
+                elif v.startswith("[") and v.endswith("]"):
+                    v = [x.strip().strip('"').strip("'") for x in v[1:-1].split(",")]
+                cfg[section][k] = v
+    except:
+        pass
+    return cfg
+
+def save_config(cfg):
+    """Write config back to config.toml."""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    lines = ["# ── crüx configuration ──\n", "# Edit this file or use Settings (Ctrl+S)\n", "\n"]
+    for section, vals in cfg.items():
+        lines.append(f"[{section}]\n")
+        for k, v in vals.items():
+            if isinstance(v, bool):
+                v = str(v).lower()
+            elif isinstance(v, list):
+                v = '[' + ', '.join(f'"{x}"' for x in v) + ']'
+            lines.append(f'{k} = "{v}"\n')
+        lines.append("\n")
+    with open(CONFIG_FILE, "w") as f:
+        f.writelines(lines)
+
+_config = load_config()
+
+# Default DB: alongside samples if library_path set, else in ~/.crux/
+_raw_db = _config["general"].get("db_path", "")
+if _raw_db:
+    DB_PATH = os.path.expanduser(_raw_db)
+else:
+    lib = _config["general"].get("library_path", "")
+    if lib:
+        DB_PATH = os.path.join(os.path.expanduser(lib), "crux.db")
+    else:
+        DB_PATH = os.path.join(CONFIG_DIR, "crux.db")
+
+LMSTUDIO_URL = _config["llm"]["url"]
+LMSTUDIO_MODEL = _config["llm"]["model"]
+LLM_API_KEY = _config["llm"].get("api_key", "")
+LLM_PROVIDER = _config["llm"].get("provider", "lm_studio")
+DEFAULT_CANDIDATES = 100
+SLOT_NAMES = ["Kick","Snare","Hat","Clap","Perc","Tom","Ride","Crash",
+              "Shaker","Cowbell","Conga","Bongo","Clav","Marimba","Fx","Bass"]
+KIT_SLOTS = _config["ui"]["kit_slots"]
+PAGE_SIZE = _config["ui"]["samples_per_page"]
+
+# ─── DB Helpers ──────────────────────────────────────────────────────────────
+class DB:
+    def __init__(self, path=None):
+        self.path = path or DB_PATH
+        self.conn = None
+    def connect(self):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self.conn = sqlite3.connect(self.path, check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+        # Ensure schema exists
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS samples (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE,
+            duration_ms INTEGER DEFAULT 0, bpm REAL, key TEXT,
+            tags TEXT DEFAULT '[]', ai_notes TEXT, genre TEXT, machine TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            rms_db REAL, spectral_centroid_hz REAL, spectral_flatness REAL,
+            transient_score REAL, onset_confidence REAL
+        )""")
+        self.conn.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS samples_fts USING fts5(
+            id UNINDEXED, name, tags, genre, machine, ai_notes, path,
+            content='samples', content_rowid='rowid'
+        )""")
+        self.conn.execute("""CREATE TRIGGER IF NOT EXISTS samples_ai_insert AFTER INSERT ON samples BEGIN
+            INSERT INTO samples_fts(rowid, id, name, tags, genre, machine, ai_notes, path)
+            VALUES (new.rowid, new.id, new.name, COALESCE(new.tags,'[]'), COALESCE(new.genre,''),
+                    COALESCE(new.machine,''), COALESCE(new.ai_notes,''), COALESCE(new.path,''));
+        END""")
+        self.conn.execute("""CREATE TRIGGER IF NOT EXISTS samples_au_update AFTER UPDATE ON samples BEGIN
+            INSERT INTO samples_fts(rowid, id, name, tags, genre, machine, ai_notes, path)
+            VALUES (new.rowid, new.id, new.name, COALESCE(new.tags,'[]'), COALESCE(new.genre,''),
+                    COALESCE(new.machine,''), COALESCE(new.ai_notes,''), COALESCE(new.path,''));
+        END""")
+        self.conn.commit()
+    async def search(self, query: str, limit: int = 1000) -> list[dict]:
+        if not self.conn: self.connect()
+        return await asyncio.to_thread(self._search_sync, query, limit)
+    def _search_sync(self, query: str, limit: int) -> list[dict]:
+        if not query.strip():
+            cur = self.conn.execute("SELECT * FROM samples ORDER BY created_at DESC LIMIT ?", (limit,))
+            return [self._parse_row(r) for r in cur.fetchall()]
+        words = query.strip().lower().split()
+        fts = " AND ".join(f'"{w}"*' for w in words if len(w) > 1)
+        sql = """SELECT s.* FROM samples s
+                 JOIN samples_fts f ON s.id = f.id
+                 WHERE samples_fts MATCH ?
+                 ORDER BY rank LIMIT ?"""
+        try:
+            cur = self.conn.execute(sql, (fts, limit))
+        except:
+            return []
+        return [self._parse_row(r) for r in cur.fetchall()]
+    def _parse_row(self, r: sqlite3.Row) -> dict:
+        d = dict(r)
+        if isinstance(d.get("tags"), str):
+            try: d["tags"] = json.loads(d["tags"])
+            except: d["tags"] = []
+        return d
+    async def get_sample(self, sid: str) -> Optional[dict]:
+        if not self.conn: self.connect()
+        return await asyncio.to_thread(self._get_sample_sync, sid)
+    def _get_sample_sync(self, sid: str) -> Optional[dict]:
+        cur = self.conn.execute("SELECT * FROM samples WHERE id = ?", (sid,))
+        r = cur.fetchone()
+        return self._parse_row(r) if r else None
+    async def get_stats(self) -> dict:
+        if not self.conn: self.connect()
+        return await asyncio.to_thread(self._stats_sync)
+    def _stats_sync(self) -> dict:
+        total = self.conn.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
+        tagged = self.conn.execute("SELECT COUNT(*) FROM samples WHERE tags != '[]' AND tags IS NOT NULL").fetchone()[0]
+        return {"total": total, "tagged": tagged}
+    def update_tags(self, sid: str, tags: list[str], genre=None, machine=None, notes=None):
+        if not self.conn: self.connect()
+        self.conn.execute("UPDATE samples SET tags=?, genre=COALESCE(?,genre), machine=COALESCE(?,machine), ai_notes=COALESCE(?,ai_notes) WHERE id=?",
+                         (json.dumps(tags), genre, machine, notes, sid))
+        self.conn.commit()
+    async def get_some(self, limit: int = 50) -> list[dict]:
+        """Quick fetch for random/initial load."""
+        if not self.conn: self.connect()
+        cur = self.conn.execute("SELECT * FROM samples ORDER BY RANDOM() LIMIT ?", (limit,))
+        return [self._parse_row(r) for r in cur.fetchall()]
+    def close(self):
+        if self.conn: self.conn.close()
+
+# ─── LLM Helper ──────────────────────────────────────────────────────────────
+import aiohttp
+async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
+                   override_url=None, override_model=None, override_key=None) -> Optional[str]:
+    url = override_url or LMSTUDIO_URL
+    model = override_model or LMSTUDIO_MODEL
+    api_key = override_key or LLM_API_KEY
+    try:
+        timeout = aiohttp.ClientTimeout(total=120)
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            async with session.post(url, json={
+                "model": model,
+                "messages": messages,
+                "stream": False,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }) as resp:
+                data = await resp.json()
+                msg = data["choices"][0]["message"]
+                # Some models (qwen with thinking mode) put output in reasoning_content
+                c = (msg.get("content") or "").strip()
+                if not c:
+                    c = (msg.get("reasoning_content") or "").strip()
+                # Strip thinking boilerplate
+                if c.startswith("Thinking") and "\n\n" in c:
+                    after = c.split("\n\n", 1)[-1].strip()
+                    if after:
+                        c = after
+                return c or None
+    except Exception as e:
+        print(f"[llm_chat] {e}", file=sys.stderr)
+        return None
+def extract_json(text: str):
+    m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
+    if m:
+        try: return json.loads(m.group())
+        except: pass
+    return None
+
+# ─── Audio Analysis with librosa ─────────────────────────────────────────
+import struct, math
+
+def describe_audio(feats: dict) -> str:
+    """Convert numerical audio features to a descriptive string for the LLM."""
+    parts = []
+    
+    dur = feats.get("duration_ms", 0)
+    if dur > 0:
+        secs = dur / 1000
+        if secs < 0.3:
+            parts.append("very short hit")
+        elif secs < 1.0:
+            parts.append("short one-shot")
+        elif secs < 3.0:
+            parts.append(f"{secs:.1f}s sample")
+        else:
+            parts.append(f"{secs:.1f}s loop")
+    
+    bpm = feats.get("bpm")
+    if bpm:
+        if bpm < 80:
+            parts.append(f"slow ({int(bpm)}bpm)")
+        elif bpm < 120:
+            parts.append(f"mid-tempo ({int(bpm)}bpm)")
+        elif bpm < 160:
+            parts.append(f"uptempo ({int(bpm)}bpm)")
+        else:
+            parts.append(f"fast ({int(bpm)}bpm)")
+    
+    rms = feats.get("rms_db")
+    if rms is not None:
+        if rms < -20:
+            parts.append("very quiet")
+        elif rms < -12:
+            parts.append("moderate volume")
+        elif rms < -6:
+            parts.append("loud")
+        else:
+            parts.append("very loud")
+    
+    centroid = feats.get("spectral_centroid_hz")
+    if centroid is not None:
+        if centroid < 500:
+            parts.append("dark/sub-bass focused")
+        elif centroid < 1500:
+            parts.append("warm/mid focused")
+        elif centroid < 3000:
+            parts.append("bright/present")
+        else:
+            parts.append("very bright/airy")
+    
+    flatness = feats.get("spectral_flatness")
+    if flatness is not None:
+        if flatness < 0.1:
+            parts.append("pure tone/tonal")
+        elif flatness < 0.3:
+            parts.append("musical/tuned")
+        elif flatness < 0.6:
+            parts.append("noise-tinged")
+        else:
+            parts.append("noisy/textural")
+    
+    onset = feats.get("onset_confidence")
+    if onset is not None:
+        if onset > 0.6:
+            parts.append("sharp attack")
+        elif onset > 0.3:
+            parts.append("moderate attack")
+        else:
+            parts.append("soft attack")
+    
+    transient = feats.get("transient_score")
+    if transient is not None:
+        if transient > 0.5:
+            parts.append("percussive/hit")
+        else:
+            parts.append("sustained")
+    
+    return " · ".join(parts) if parts else "unknown"
+
+
+def analyze_audio(path: str) -> dict:
+    """Full spectral analysis using librosa.
+    
+    Extracts: duration, BPM, key, RMS energy, spectral centroid,
+    spectral flatness, onset strength, transient character.
+    All values are stored for later LLM consumption.
+    """
+    features = {
+        "duration_ms": 0, "bpm": None, "key": None,
+        "rms_db": None, "spectral_centroid_hz": None,
+        "spectral_flatness": None, "transient_score": None,
+        "onset_confidence": None,
+    }
+    
+    # Try librosa first for full spectral analysis
+    try:
+        import librosa
+        import numpy as np
+        
+        y, sr = librosa.load(path, sr=22050, duration=10, mono=True)
+        if len(y) == 0:
+            return features
+        
+        features["duration_ms"] = int(len(y) / sr * 1000)
+        
+        # BPM via beat tracking
+        try:
+            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+            if tempo and tempo > 0:
+                features["bpm"] = round(float(tempo), 1)
+        except:
+            pass
+        
+        # Spectral centroid (brightness)
+        try:
+            cent = librosa.feature.spectral_centroid(y=y, sr=sr)
+            features["spectral_centroid_hz"] = round(float(np.mean(cent)), 1)
+        except:
+            pass
+        
+        # RMS energy (loudness)
+        try:
+            rms = librosa.feature.rms(y=y)
+            rms_db_val = 20 * np.log10(np.mean(rms) + 1e-10)
+            features["rms_db"] = round(float(rms_db_val), 1)
+        except:
+            pass
+        
+        # Spectral flatness (tonal vs noisy)
+        try:
+            flat = librosa.feature.spectral_flatness(y=y, sr=sr)
+            features["spectral_flatness"] = round(float(np.mean(flat)), 3)
+        except:
+            pass
+        
+        # Onset strength (attack character)
+        try:
+            onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+            features["onset_confidence"] = round(float(np.mean(onset_env) / (np.max(onset_env) + 1e-10)), 3)
+        except:
+            pass
+        
+        # Transient ratio (percussive vs sustained)
+        try:
+            # Use spectral flux as a proxy for transience
+            onset_frames = librosa.onset.onset_detect(y=y, sr=sr, backtrack=False)
+            if len(y) > 0:
+                ratio = len(onset_frames) / (len(y) / sr)
+                features["transient_score"] = round(min(ratio / 5.0, 1.0), 3)
+        except:
+            pass
+            
+    except ImportError:
+        # Fallback: ffprobe duration, ffmpeg autocorrelation BPM
+        try:
+            r = subprocess.run(["ffprobe", "-v", "0", "-show_entries", "format=duration",
+                               "-of", "csv=p=0", path], capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                features["duration_ms"] = int(float(r.stdout.strip()) * 1000)
+        except:
+            pass
+        try:
+            r = subprocess.run(["ffmpeg", "-i", path, "-ac", "1", "-ar", "22050",
+                               "-f", "f32le", "-", "-y"], capture_output=True, timeout=10)
+            if r.returncode == 0:
+                samples = struct.unpack(f"{len(r.stdout)//4}f", r.stdout)
+                if len(samples) > 4410:
+                    corr = []
+                    for lag in range(int(22050/200), int(22050/60)):
+                        s = sum(samples[i]*samples[i+lag] for i in range(min(len(samples)-lag, 22050)))
+                        corr.append((lag, s))
+                    if corr:
+                        best = max(corr, key=lambda x: x[1])
+                        features["bpm"] = round(60.0 / (best[0] / 22050.0), 1)
+        except:
+            pass
+    
+    return features
+
+# ─── Import Pipeline ─────────────────────────────────────────────────────────
+AUDIO_EXTS = {".wav", ".mp3", ".aiff", ".aif", ".flac", ".ogg", ".m4a"}
+
+async def import_pipeline(folder: str, db: DB, app_ref=None):
+    """Walk folder, analyze audio, insert immediately (no LLM tagging—run tag separately)."""
+    if not db.conn: db.connect()
+    folder = os.path.expanduser(folder)
+    
+    # Walk and count files
+    files = []
+    for root, dirs, fnames in os.walk(folder):
+        for f in fnames:
+            if Path(f).suffix.lower() in AUDIO_EXTS:
+                files.append(os.path.join(root, f))
+    total = len(files)
+    if total == 0:
+        msg = "no audio files found"
+        print(msg, file=sys.stderr)
+        if app_ref: app_ref.post_message(StatusMsg(msg))
+        return 0
+    
+    # Ensure schema
+    db.conn.execute("""CREATE TABLE IF NOT EXISTS samples (
+        id TEXT PRIMARY KEY, name TEXT, path TEXT UNIQUE,
+        duration_ms INTEGER DEFAULT 0, bpm REAL, key TEXT,
+        tags TEXT DEFAULT '[]', ai_notes TEXT, genre TEXT, machine TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        rms_db REAL, spectral_centroid_hz REAL, spectral_flatness REAL,
+        transient_score REAL, onset_confidence REAL
+    )""")
+    db.conn.execute("""CREATE VIRTUAL TABLE IF NOT EXISTS samples_fts USING fts5(
+        id UNINDEXED, name, tags, genre, machine, ai_notes, path,
+        content='samples', content_rowid='rowid'
+    )""")
+    db.conn.commit()
+    
+    msg = f"Found {total} files, analyzing + inserting..."
+    print(msg, file=sys.stderr)
+    if app_ref: app_ref.post_message(StatusMsg(msg))
+    
+    imported = 0
+    last_report = 0
+    
+    for i, fpath in enumerate(files):
+        name = Path(fpath).stem
+        feats = analyze_audio(fpath)
+        sid = str(uuid.uuid4())
+        
+        try:
+            db.conn.execute(
+                "INSERT OR IGNORE INTO samples (id, name, path, duration_ms, bpm, rms_db, spectral_centroid_hz, spectral_flatness, transient_score, onset_confidence) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (sid, name, fpath, feats["duration_ms"], feats["bpm"],
+                 feats["rms_db"], feats["spectral_centroid_hz"],
+                 feats["spectral_flatness"], feats["transient_score"],
+                 feats["onset_confidence"]))
+            db.conn.commit()
+            imported += 1
+        except:
+            continue
+        
+        # Report every 5%
+        pct = (i + 1) * 100 // total
+        if pct // 5 > last_report // 5:
+            last_report = pct
+            msg = f"[{pct}%] {i+1}/{total} imported"
+            print(msg, file=sys.stderr)
+            if app_ref: app_ref.post_message(StatusMsg(msg))
+    
+    final = f"✓ imported {imported}/{total} samples — run 'tag' command for LLM labeling"
+    print(final, file=sys.stderr)
+    if app_ref: app_ref.post_message(StatusMsg(final))
+    return imported
+
+# ─── TUI Widgets & Screens ────────────────────────────────────────────────────
+class StatusMsg(Message):
+    def __init__(self, text: str):
+        self.text = text
+        super().__init__()
+
+class SamplesUpdated(Message):
+    def __init__(self, samples: list[dict], query: str):
+        self.samples = samples
+        self.query = query
+        super().__init__()
+
+class KitRefined(Message):
+    def __init__(self, slots: list[Optional[dict]]):
+        self.slots = slots
+        super().__init__()
+
+# ─── Settings Screen ──────────────────────────────────────────────────────────
+class SettingsScreen(Screen):
+    """Configure LLM provider and paths — simple, no custom CSS fights."""
+    
+    BINDINGS = [
+        Binding("escape", "close_settings", "Close"),
+        Binding("ctrl+s", "save", "Save"),
+    ]
+    
+    CSS = """
+    SettingsScreen {
+        background: #0b1a20;
+    }
+    #settings-wrap {
+        width: 60;
+        height: 100%;
+        margin: 1 2;
+    }
+    .shdr {
+        color: #1a9e9e;
+        text-style: bold;
+        height: 2;
+    }
+    .slbl {
+        color: #b8c8c8;
+        height: 2;
+    }
+    Input {
+        background: #0f2128;
+        color: #e8f0f0;
+        border: solid #1a3a45;
+        height: 3;
+    }
+    Input:focus {
+        border: solid #1a9e9e;
+    }
+    Button {
+        background: #152a33;
+        color: #b8c8c8;
+        border: solid #1a3a45;
+        height: 3;
+        min-width: 14;
+    }
+    Button:hover {
+        border: solid #1a9e9e;
+    }
+    Button.primary {
+        background: #1a9e9e;
+        color: #0b1a20;
+    }
+    #prov-btns {
+        layout: horizontal;
+        height: 4;
+        margin: 0 0 1 0;
+    }
+    #prov-btns Button {
+        width: 1fr;
+        min-width: 12;
+    }
+    #s-actions {
+        height: 4;
+        margin-top: 1;
+    }
+    #s-result {
+        color: #5a8a8a;
+        height: 2;
+    }
+    """
+    
+    def action_close_settings(self):
+        self.dismiss(None)
+    
+    def __init__(self):
+        super().__init__()
+        self.cfg = load_config()
+        self._dirty = False
+    
+    def compose(self):
+        llm = self.cfg.get("llm", {})
+        gen = self.cfg.get("general", {})
+        prov = llm.get("provider", "lm_studio")
+        yield ScrollableContainer(
+            Static("╔═ crüx Settings ═══════════════════════", classes="shdr"),
+            Static("Provider", classes="slbl"),
+            Horizontal(
+                Button("LM Studio", id="p-lm_studio"),
+                Button("Ollama", id="p-ollama"),
+                Button("OpenAI", id="p-openai"),
+                Button("Custom", id="p-custom"),
+                id="prov-btns",
+            ),
+            Static("API URL", classes="slbl"),
+            Input(value=llm.get("url", ""), id="s-url",
+                  placeholder="http://localhost:1234/v1/chat/completions"),
+            Static("Model", classes="slbl"),
+            Input(value=llm.get("model", ""), id="s-model",
+                  placeholder="gemma-4-26b-a4b-it-mlx"),
+            Static("API Key (blank for local)", classes="slbl"),
+            Input(value=llm.get("api_key", ""), id="s-key", password=True,
+                  placeholder="sk-..."),
+            Static("Library Path", classes="slbl"),
+            Input(value=gen.get("library_path", ""), id="s-lib",
+                  placeholder="~/Music/Samples"),
+            Static("", id="s-result"),
+            Horizontal(
+                Button("Test", id="s-test"),
+                Button("Save", id="s-save", variant="primary"),
+                Button("Cancel", id="s-cancel"),
+                id="s-actions",
+            ),
+            id="settings-wrap",
+        )
+    
+    def on_mount(self):
+        self._highlight_provider()
+    
+    def _highlight_provider(self):
+        prov = self.cfg.get("llm", {}).get("provider", "lm_studio")
+        for pid in ("lm_studio", "ollama", "openai", "custom"):
+            try:
+                btn = self.query_one(f"#p-{pid}", Button)
+                btn.variant = "primary" if pid == prov else "default"
+            except:
+                pass
+    
+    def on_input_changed(self, event: Input.Changed):
+        if event.input.id == "s-url":
+            self._detect_provider_from_url(event.value)
+    
+    def _detect_provider_from_url(self, url: str):
+        url_lower = url.strip().lower()
+        if "localhost:1234" in url_lower or "lmstudio" in url_lower:
+            prov = "lm_studio"
+        elif "localhost:11434" in url_lower:
+            prov = "ollama"
+        elif "openai.com" in url_lower:
+            prov = "openai"
+        else:
+            return  # Don't override Custom or unrecognized
+        self.cfg.setdefault("llm", {})["provider"] = prov
+        self._highlight_provider()
+    
+    def on_button_pressed(self, event: Button.Pressed):
+        btn_id = event.button.id
+        if btn_id and btn_id.startswith("p-"):
+            prov = btn_id[2:]
+            self.cfg.setdefault("llm", {})["provider"] = prov
+            if prov in PROVIDER_PRESETS:
+                p = PROVIDER_PRESETS[prov]
+                self.query_one("#s-url", Input).value = p["url"]
+                self.query_one("#s-model", Input).value = p["model"]
+                if prov != "openai":
+                    self.query_one("#s-key", Input).value = ""
+            self._highlight_provider()
+        elif btn_id == "s-test":
+            self._test()
+        elif btn_id == "s-save":
+            self._save()
+        elif btn_id == "s-cancel":
+            self.dismiss(None)
+    
+    def _test(self):
+        url = self.query_one("#s-url", Input).value.strip()
+        model = self.query_one("#s-model", Input).value.strip()
+        key = self.query_one("#s-key", Input).value.strip()
+        result = self.query_one("#s-result", Static)
+        result.update("Testing...")
+        self._do_test(url, model, key, result)
+    
+    @work
+    async def _do_test(self, url, model, key, result):
+        try:
+            resp = await llm_chat(
+                [{"role": "user", "content": "Say ok"}],
+                max_tokens=5, override_url=url, override_model=model, override_key=key,
+            )
+            result.update(f"✓ {resp[:50]}" if resp else "✗ No response")
+        except Exception as e:
+            result.update(f"✗ {e}")
+    
+    def _save(self):
+        llm = self.cfg.setdefault("llm", {})
+        # Find which provider button is active
+        prov_found = False
+        for pid in ("lm_studio", "ollama", "openai", "custom"):
+            try:
+                btn = self.query_one(f"#p-{pid}", Button)
+                if btn.variant == "primary":
+                    llm["provider"] = pid
+                    prov_found = True
+                    break
+            except:
+                pass
+        if not prov_found:
+            # Fallback: detect from URL
+            url = self.query_one("#s-url", Input).value.strip().lower()
+            if "localhost:1234" in url or "lm-studio" in url:
+                llm["provider"] = "lm_studio"
+            elif "localhost:11434" in url:
+                llm["provider"] = "ollama"
+            elif "openai.com" in url:
+                llm["provider"] = "openai"
+            else:
+                llm["provider"] = "custom"
+        llm["url"] = self.query_one("#s-url", Input).value.strip()
+        llm["model"] = self.query_one("#s-model", Input).value.strip()
+        llm["api_key"] = self.query_one("#s-key", Input).value.strip()
+        self.cfg.setdefault("general", {})["library_path"] = self.query_one("#s-lib", Input).value.strip()
+        save_config(self.cfg)
+        self.dismiss(True)
+
+# ─── Main App ─────────────────────────────────────────────────────────────────
+class CruxApp(App):
+    CSS = """
+    /* ── Shark Palette ── */
+    Screen { background: #0b1a20; }
+
+    #main-container {
+        height: 100%;
+        layout: grid;
+        grid-size: 1 4;
+        grid-rows: auto auto 1fr auto;
+    }
+    #header-bar {
+        height: 2;
+        background: #0f2128;
+        padding: 0 1;
+        content-align: center middle;
+    }
+    #header-bar > Static {
+        color: #1a9e9e;
+        text-style: bold;
+    }
+    #prompt-bar {
+        height: 3;
+        background: #0f2128;
+        padding: 0 1;
+    }
+    #prompt-input {
+        background: #0b1a20;
+        color: #b8c8c8;
+        border: solid #1a3a45;
+        padding: 0 1;
+    }
+    #prompt-input:focus {
+        border: solid #1a9e9e;
+    }
+    #content-area {
+        height: 100%;
+        layout: grid;
+        grid-size: 2 1;
+        grid-columns: 3fr 2fr;
+    }
+    #sample-panel {
+        background: #0b1a20;
+        border-right: solid #1a3a45;
+        height: 100%;
+    }
+    #sample-list {
+        height: 100%;
+        overflow-y: auto;
+    }
+    #sample-list ListView {
+        height: 100%;
+        border: none;
+        background: transparent;
+    }
+    ListItem {
+        background: transparent;
+        padding: 0 1;
+        height: 1;
+    }
+    ListItem:hover { background: #0f2128; }
+    ListItem > Label { color: #b8c8c8; }
+    ListView:focus .list-item--focused {
+        background: rgba(26,158,158,0.15);
+    }
+    #kit-panel {
+        background: #0f2128;
+        height: 100%;
+        padding: 0 0 0 1;
+    }
+    #kit-grid {
+        height: 100%;
+        overflow-y: auto;
+    }
+    #kit-grid ListView {
+        height: 100%;
+        border: none;
+        background: transparent;
+    }
+    #kit-input {
+        background: #0b1a20;
+        color: #b8c8c8;
+        border: solid #1a3a45;
+        padding: 0 1;
+        height: 3;
+    }
+    #kit-input:focus {
+        border: solid #1a9e9e;
+    }
+    #kit-grid ListItem {
+        background: transparent;
+        border-bottom: solid #1a3a45;
+        height: 2;
+        padding: 0;
+    }
+    #kit-grid ListItem > Label { color: #b8c8c8; }
+    .kit-slot { padding: 0 1; }
+    .slot-label { color: #1a9e9e; text-style: bold; min-width: 8; }
+    .slot-name { color: #b8c8c8; }
+    .slot-empty { color: #3a5a65; text-style: italic; }
+    .slot-locked { color: #3a5a65; }
+    #status-bar {
+        height: 1;
+        background: #0f2128;
+        padding: 0 1;
+    }
+    #status-bar > Static { color: #3a5a65; }
+
+    Button {
+        background: #152a33;
+        color: #b8c8c8;
+        border: solid #1a3a45;
+        min-width: 8;
+        height: 2;
+    }
+    Button:hover { border: solid #1a9e9e; }
+    Button:focus { border: solid #1a9e9e; }
+    Button.accent { color: #e0673a; border: solid #7a3a20; }
+
+    #import-screen { align: center middle; }
+    #import-box { width: 60; height: 20; background: #0f2128; border: solid #1a9e9e; padding: 1 2; }
+    #import-title { color: #1a9e9e; text-style: bold; }
+    #import-status { color: #b8c8c8; height: 1; }
+    #import-log { height: 14; overflow-y: auto; background: #0b1a20; border: solid #1a3a45; padding: 0 1; }
+    #import-log > Static { color: #b8c8c8; }
+    """
+    
+    BINDINGS = [
+        Binding("ctrl+c", "quit", "Quit", priority=True),
+        Binding("ctrl+q", "quit", "Quit"),
+        Binding("escape", "clear_search", "Clear"),
+        Binding("f5", "refresh", "Refresh"),
+        Binding("tab", "focus_next", "Next pane"),
+        Binding("p", "play", "Play"),
+        Binding("ctrl+s", "settings", "Settings"),
+
+        Binding("space", "toggle_lock", "Lock/unlock"),
+        Binding("delete", "clear_kit_slot", "Clear slot"),
+        Binding("up", "kit_up", "Kit slot ↑"),
+        Binding("down", "kit_down", "Kit slot ↓"),
+    ]
+    
+    def __init__(self, import_path=None):
+        super().__init__()
+        self.db = DB()
+        self.db.connect()
+        self._samples: list[dict] = []
+        self._query = ""
+        self._selected = set()
+        self._kit: list[Optional[dict]] = [None] * KIT_SLOTS
+        self._kit_locked: list[bool] = [False] * KIT_SLOTS
+        self._import_path = import_path
+        self._stats = {"total": 0, "tagged": 0}
+        self._kit_index = 0
+    
+    def compose(self):
+        yield Container(
+            Container(
+                Static("🦈 crüx  │  loading…"),
+                id="header-bar",
+            ),
+            Container(
+                Input(placeholder="search · build · refine — one prompt to rule them all", id="prompt-input"),
+                id="prompt-bar",
+            ),
+            Container(
+                Container(
+                    ListView(id="sample-list"),
+                    id="sample-panel",
+                ),
+                Container(
+                    Vertical(
+                        ListView(id="kit-grid"),
+                    ),
+                    id="kit-panel",
+                ),
+                id="content-area",
+            ),
+            Container(
+                Static("type & enter=search/build/refine · empty enter=add to kit · Ctrl+S=settings · p=play"),
+                id="status-bar",
+            ),
+            id="main-container",
+        )
+    
+    def on_mount(self) -> None:
+        self.query_one("#prompt-input", Input).focus()
+        self.load_stats()
+        self.search("")
+        self.render_kit()
+        if self._import_path:
+            self.run_import(self._import_path)
+    
+    @work
+    async def load_stats(self):
+        self._stats = await self.db.get_stats()
+        self._update_header()
+        self._update_search_status()
+    
+    def _update_header(self):
+        try:
+            hdr = self.query_one("#header-bar", Container).query(Static).first()
+            hdr.update(f"🦈 crüx  │  {self._stats['total']} samples  │  {self._stats['tagged']} tagged")
+        except:
+            pass
+    
+    def _update_search_status(self):
+        try:
+            total = self._stats.get("total", 0) or 0
+            self.query_one("#status-bar", Container).query(Static).first().update(
+                f"{len(self._samples)} results  •  {total} total")
+        except:
+            pass
+    
+    # ─── Search ──────────────────────────────────────────────────────────────
+    @work(exclusive=True)
+    async def search(self, query: str) -> None:
+        self._query = query
+        self._samples = await self.db.search(query, PAGE_SIZE)
+        lv = self.query_one("#sample-list", ListView)
+        lv.clear()
+        for s in self._samples:
+            name = s.get("name", "?")
+            bpm = f" [orange1]{int(s['bpm'])}bpm[/]" if s.get("bpm") else ""
+            dur = f" {s.get('duration_ms',0)//1000}s" if s.get("duration_ms") else ""
+            machine = f" [cyan]{s['machine']}[/]" if s.get("machine") else ""
+            genre = f" [{s['genre']}]" if s.get("genre") else ""
+            tags = (s.get("tags") or [])
+            tag_str = " " + " ".join(t[:8] for t in tags[:3]) if tags else ""
+            lv.append(ListItem(Label(f"{name}{machine}{genre}{bpm}{dur}{tag_str}")))
+        self._update_search_status()
+    
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        q = event.value.strip()
+        event.input.clear()
+        if not q:
+            # Empty Enter → add highlighted sample to current kit slot
+            lv = self.query_one("#sample-list", ListView)
+            idx = lv.index
+            if idx is not None and 0 <= idx < len(self._samples):
+                s = self._samples[idx]
+                self._kit[self._kit_index] = s
+                self._advance_kit_slot()
+                self.render_kit()
+                slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
+                self.set_status(f"added {s['name']} → {slot_name}")
+            return
+        
+        first = q.split()[0].lower()
+        has_kit = any(s is not None for s in self._kit)
+        
+        # Explicit command keywords → LLM build or search
+        if first in ("build", "make", "create", "new"):
+            self.set_status(f"▶ LLM: {q}…")
+            self.run_llm(q)
+            return
+        
+        # If we have a kit, treat ambiguous input as refine first
+        if has_kit and first in ("darker", "heavier", "softer", "warmer", "brighter", "swap", "more", "less", "dub", "punchier", "cleaner", "looser", "tighter"):
+            self.kit_refine(q)
+            return
+        
+        # Single genre word with a kit → build new kit
+        if first in ("techno", "house", "ambient", "lofi", "trap", "funk", "soul", "garage", "drill", "dnb", "jungle", "breakbeat", "electro", "hiphop", "jazz", "rock", "metal", "pop", "reggae", "dubstep", "drum", "bass"):
+            self.run_llm(q)
+            return
+        
+        # Has a kit but not recognized → try refine first, fallback to search
+        if has_kit and len(q.split()) <= 3:
+            # Could be a direction, try refine
+            self.set_status(f"refining: {q}…")
+            self.kit_refine(q)
+            return
+        
+        # Default: search
+        self.search(q)
+    
+    # ─── LLM Commands ────────────────────────────────────────────────────────
+    @work
+    async def run_llm(self, prompt: str) -> None:
+        try:
+            await self._run_llm_impl(prompt)
+        except Exception as e:
+            self.set_status(f"LLM error: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    async def _run_llm_impl(self, prompt: str) -> None:
+        self.set_status(f"LLM: {prompt}…")
+        
+        # Strip command words + generic filler to get the real search intent
+        stop_words = {"build", "make", "create", "new", "find", "search", "get", "give", "show",
+                      "kit", "drum", "sample", "samples", "me", "a", "the", "an", "with", "of", "for"}
+        search_words = [w for w in prompt.lower().split() if w not in stop_words]
+        search_query = " ".join(search_words) or prompt
+        
+        # Ensure stats are fresh
+        stats = await self.db.get_stats()
+        self._stats = stats
+        self._update_header()
+        
+        # Search broadly: get a balanced set of candidates across drum types
+        seen_ids = set()
+        all_candidates = []
+        
+        # 1) Broad FTS5 search for the query
+        broad = await self.db.search(search_query, 200)
+        for s in broad:
+            if s["id"] not in seen_ids:
+                all_candidates.append(s)
+                seen_ids.add(s["id"])
+        
+        # 2) If too few results, fall back to LIKE search
+        if len(all_candidates) < 30:
+            try:
+                like = f"%{search_query}%"
+                cur = self.db.conn.execute(
+                    "SELECT * FROM samples WHERE tags LIKE ? OR name LIKE ? OR machine LIKE ? ORDER BY RANDOM() LIMIT 200",
+                    (like, like, like))
+                for r in cur.fetchall():
+                    d = self.db._parse_row(r)
+                    if d["id"] not in seen_ids:
+                        all_candidates.append(d)
+                        seen_ids.add(d["id"])
+            except:
+                pass
+        
+        # 3) For each drum slot type, search specifically for that type + query
+        for slot_name in list(SLOT_NAMES[:8]):
+            try:
+                slot_q = f"{slot_name} {search_query}"
+                slot_results = await self.db.search(slot_q, 30)
+                for s in slot_results:
+                    if s["id"] not in seen_ids:
+                        all_candidates.append(s)
+                        seen_ids.add(s["id"])
+            except:
+                pass
+        
+        # 4) If still too few, pull random samples to give the LLM a diverse palette
+        if len(all_candidates) < 60:
+            try:
+                cur = self.db.conn.execute(
+                    "SELECT * FROM samples WHERE id NOT IN ({}) ORDER BY RANDOM() LIMIT 100".format(
+                        ",".join(f"'{x}'" for x in list(seen_ids)[:500]) or "''"))
+                for r in cur.fetchall():
+                    d = self.db._parse_row(r)
+                    if d["id"] not in seen_ids:
+                        all_candidates.append(d)
+                        seen_ids.add(d["id"])
+            except:
+                pass
+        
+        has_genre_match = len(broad) > 5
+        candidates = ""
+        for i, s in enumerate(all_candidates[:120]):
+            tags = (s.get("tags") or [])
+            feats_dict = {
+                "duration_ms": s.get("duration_ms", 0),
+                "bpm": s.get("bpm"),
+                "rms_db": s.get("rms_db"),
+                "spectral_centroid_hz": s.get("spectral_centroid_hz"),
+                "spectral_flatness": s.get("spectral_flatness"),
+                "transient_score": s.get("transient_score"),
+                "onset_confidence": s.get("onset_confidence"),
+            }
+            char = describe_audio(feats_dict)
+            tag_str = ' '.join(tags[:4])
+            machine = s.get('machine') or ''
+            candidates += f"{s['id']}: {s['name']} | {tag_str} | {machine} | {char}\n"
+        
+        slot_spec = ', '.join(f"{i}={SLOT_NAMES[i] if i < len(SLOT_NAMES) else f'Slot{i+1}'}" for i in range(KIT_SLOTS))
+        
+        if has_genre_match:
+            context_note = f'Genre-matched candidates for "{search_query}"'
+        else:
+            context_note = f'No exact genre matches for "{search_query}" — using diverse unlabeled samples. Curate a cohesive {search_query} kit from what\'s available, picking the closest drum sounds for each slot.'
+        
+        sys_msg = {'role': 'system', 'content': f'You are crüx, a sample curation engine for music producers. Library: {stats["total"]} samples, {stats["tagged"]} tagged. {context_note}'}
+        user_msg = {'role': 'user', 'content': f'User request: "{prompt}"\nCANDIDATES ({len(all_candidates)}):\n{candidates}\nSLOTS: {slot_spec}\nAssign each slot the best match. JSON: {{"action":"kit","slots":[{{"slot":0,"sampleId":"id"}},...],"name":"..."}}. If no perfect match, pick closest. Return ONLY JSON.'}
+        
+        resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1000)
+        if not resp:
+            self.set_status("LM Studio offline — start it for LLM commands")
+            return
+        
+        j = extract_json(resp)
+        if not j:
+            self.set_status(f"LLM: {resp[:80]}…")
+            return
+        
+        action = j.get("action", "message")
+        if action == "search":
+            self.search(j.get("query", prompt))
+            self.set_status(f"searched: {j.get('query','')}")
+        elif action == "kit":
+            slots = j.get("slots", [])
+            if not slots:
+                # Fallback: old format with just ids
+                ids = j.get("ids", [])
+                if len(ids) < 2:
+                    self.set_status(f"LLM: not enough samples")
+                    return
+                slots = [{"slot": i, "sampleId": sid} for i, sid in enumerate(ids)]
+            name = j.get("name", f"kit-{int(time.time())}")
+            self._kit = [None] * KIT_SLOTS
+            self._kit_locked = [False] * KIT_SLOTS
+            assigned = 0
+            for entry in slots:
+                idx = entry.get("slot")
+                sid = entry.get("sampleId")
+                if idx is None or not sid:
+                    continue
+                if idx < 0 or idx >= KIT_SLOTS:
+                    continue
+                s = await self.db.get_sample(sid)
+                if s:
+                    self._kit[idx] = s
+                    assigned += 1
+            self.render_kit()
+            self.set_status(f"built \"{name}\" ({assigned}/{KIT_SLOTS} slots)")
+        else:
+            self.set_status(j.get("message", "ok"))
+    
+    # ─── Kit ─────────────────────────────────────────────────────────────────
+    def render_kit(self):
+        lv = self.query_one("#kit-grid", ListView)
+        lv.clear()
+        for i in range(KIT_SLOTS):
+            s = self._kit[i]
+            label = SLOT_NAMES[i] if i < len(SLOT_NAMES) else f"Slot {i+1}"
+            locked = self._kit_locked[i]
+            cursor = "▸ " if i == self._kit_index else "  "
+            lock_mark = "[bold red]🔒[/]" if locked else "[dim]🔓[/]"
+            if s:
+                bpm = f" {int(s['bpm'])}bpm" if s.get("bpm") else ""
+                dur = f" {s.get('duration_ms',0)//1000}s" if s.get("duration_ms") else ""
+                machine = f" {s['machine']}" if s.get("machine") else ""
+                tags = (s.get("tags") or [])
+                tag_str = " " + " ".join(t[:6] for t in tags[:2]) if tags else ""
+                lv.append(ListItem(Label(
+                    f"{cursor}[bold #1a9e9e]{label:>6}[/] {lock_mark} [white]{s['name']}[/]{machine}{bpm}{dur}{tag_str}"
+                )))
+            else:
+                lv.append(ListItem(Label(f"{cursor}[bold #1a9e9e]{label:>6}[/] 🔓 [italic #3a5a65]— empty[/]")))
+        if lv.children:
+            lv.index = min(self._kit_index, len(lv.children) - 1)
+    
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        lv = event.list_view
+        if lv.id == "kit-grid":
+            idx = lv.index
+            if idx is not None and 0 <= idx < KIT_SLOTS:
+                self._kit_index = idx
+                self.render_kit()
+                self.set_status(f"slot: {SLOT_NAMES[idx] if idx < len(SLOT_NAMES) else f'Slot {idx+1}'}")
+        elif lv.id == "sample-list":
+            idx = lv.index
+            if idx is not None and 0 <= idx < len(self._samples):
+                s = self._samples[idx]
+                self._kit[self._kit_index] = s
+                self._advance_kit_slot()
+                self.render_kit()
+                self.set_status(f"added {s['name']} → {SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f'Slot {self._kit_index+1}'}")
+    
+    def _advance_kit_slot(self):
+        """Move to next empty kit slot."""
+        next_empty = next((i for i in range(self._kit_index + 1, KIT_SLOTS) if not self._kit[i]), None)
+        if next_empty is not None:
+            self._kit_index = next_empty
+        elif self._kit_index < KIT_SLOTS - 1:
+            self._kit_index += 1
+    
+    def kit_refine(self, direction: str):
+        if not direction.strip(): return
+        unlocked = [i for i in range(KIT_SLOTS) if self._kit[i] and not self._kit_locked[i]]
+        if not unlocked:
+            self.set_status("all slots locked — unlock some to refine")
+            return
+        self.run_kit_refine(direction, unlocked)
+    
+    @work(exclusive=True)
+    async def run_kit_refine(self, direction: str, unlocked: list[int]):
+        self.set_status(f"refining: {direction}…")
+        relevant = await self.db.search(direction, 100)
+        locked_ids = set()
+        for i, s in enumerate(self._kit):
+            if s and self._kit_locked[i]:
+                locked_ids.add(s["id"])
+        candidates = []
+        for s in relevant:
+            if s["id"] not in locked_ids:
+                candidates.append(s)
+        cand_str = ""
+        for i, s in enumerate(candidates[:80]):
+            tags = " ".join(s.get("tags") or [])[:60]
+            feats_dict = {
+                "duration_ms": s.get("duration_ms", 0),
+                "bpm": s.get("bpm"),
+                "rms_db": s.get("rms_db"),
+                "spectral_centroid_hz": s.get("spectral_centroid_hz"),
+                "spectral_flatness": s.get("spectral_flatness"),
+                "transient_score": s.get("transient_score"),
+                "onset_confidence": s.get("onset_confidence"),
+            }
+            char = describe_audio(feats_dict)
+            cand_str += f"{s['id']}: {s['name']} | {tags} | {s.get('genre') or '-'} | {char}\n"
+        
+        kit_str = ""
+        for i in range(KIT_SLOTS):
+            s = self._kit[i]
+            lock = "🔒" if self._kit_locked[i] else "🔓"
+            label = SLOT_NAMES[i] if i < len(SLOT_NAMES) else f"Slot{i+1}"
+            if s:
+                kit_str += f"{i}:{lock}{label}={s['name']} "
+            else:
+                kit_str += f"{i}:{lock}{label}=— "
+        
+        sys_msg = {"role": "system", "content": "You are crüx, a sample curation engine. Respond in JSON only."}
+        user_msg = {"role": "user", "content": f"Refine direction: \"{direction}\"\n\nCurrent kit:\n{kit_str}\n\nUnlocked slots: {unlocked}\n\nCandidates:\n{cand_str}\n\nFor each unlocked slot, pick the best matching sample from candidates. Return: {{\"reassignments\":[{{\"slotIndex\":0,\"sampleId\":\"id\",\"reason\":\"...\"}}]}}"}
+        
+        resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1000)
+        if not resp:
+            self.set_status("LLM offline — can't refine")
+            return
+        j = extract_json(resp)
+        if not j or "reassignments" not in j:
+            self.set_status("no changes suggested")
+            return
+        
+        count = 0
+        for r in j["reassignments"]:
+            idx = r.get("slotIndex")
+            sid = r.get("sampleId")
+            if idx is not None and 0 <= idx < KIT_SLOTS and not self._kit_locked[idx] and sid:
+                s = await self.db.get_sample(sid)
+                if s:
+                    self._kit[idx] = s
+                    count += 1
+        self.render_kit()
+        self.set_status(f"refined {count} slots: {direction}")
+    
+    # ─── Import ──────────────────────────────────────────────────────────────
+    @work
+    async def run_import(self, path: str):
+        self.set_status(f"importing: {path}…")
+        self._import_path = None
+        results = await import_pipeline(path, self.db, app_ref=self)
+        if results:
+            self.set_status(f"✓ imported {results} samples")
+            self._stats = await self.db.get_stats()
+            self._update_header()
+            self.search("")
+        else:
+            self.set_status("import: no new samples found")
+    
+    def on_status_msg(self, msg: StatusMsg) -> None:
+        self.set_status(msg.text)
+    
+    def set_status(self, text: str):
+        try:
+            self.query_one("#status-bar", Container).query(Static).first().update(str(text)[:80])
+        except:
+            pass
+    
+    # ─── Actions ─────────────────────────────────────────────────────────────
+    def action_clear_search(self):
+        self.search("")
+        self.query_one("#prompt-input", Input).clear()
+        self.query_one("#prompt-input", Input).focus()
+    
+    def action_refresh(self):
+        self.set_status("refreshing…")
+        self.load_stats()
+        self.search(self._query)
+    
+    def action_play(self):
+        lv = self.query_one("#sample-list", ListView)
+        idx = lv.index
+        if idx is not None and 0 <= idx < len(self._samples):
+            s = self._samples[idx]
+            path = s.get("path", "")
+            if path and os.path.exists(path):
+                subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.set_status(f"▶ playing: {s.get('name','?')}")
+    
+    def action_add_to_kit(self):
+        """Add highlighted sample from list to the active kit slot."""
+        lv = self.query_one("#sample-list", ListView)
+        idx = lv.index
+        if idx is not None and 0 <= idx < len(self._samples):
+            s = self._samples[idx]
+            self._kit[self._kit_index] = s
+            self._advance_kit_slot()
+            self.render_kit()
+            lv.focus()
+            slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
+            self.set_status(f"added {s['name']} → {slot_name}")
+    
+    def action_toggle_lock(self):
+        """Toggle lock on the active kit slot."""
+        self._kit_locked[self._kit_index] = not self._kit_locked[self._kit_index]
+        self.render_kit()
+        status = "🔒 locked" if self._kit_locked[self._kit_index] else "🔓 unlocked"
+        slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
+        self.set_status(f"{slot_name} {status}")
+    
+    def action_clear_kit_slot(self):
+        """Clear the active kit slot."""
+        self._kit[self._kit_index] = None
+        self._kit_locked[self._kit_index] = False
+        self.render_kit()
+        slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
+        self.set_status(f"{slot_name} cleared")
+    
+    def action_kit_up(self):
+        if self._kit_index > 0:
+            self._kit_index -= 1
+            self.render_kit()
+    
+    def action_kit_down(self):
+        if self._kit_index < KIT_SLOTS - 1:
+            self._kit_index += 1
+            self.render_kit()
+    
+    def action_settings(self):
+        """Open the settings modal."""
+        def _on_settings_done(changed):
+            if changed:
+                global _config, LMSTUDIO_URL, LMSTUDIO_MODEL, LLM_API_KEY, DB_PATH, KIT_SLOTS, PAGE_SIZE
+                _config = load_config()
+                _db = _config["general"].get("db_path", "")
+                if _db:
+                    DB_PATH = os.path.expanduser(_db)
+                else:
+                    lib = _config["general"].get("library_path", "")
+                    if lib:
+                        DB_PATH = os.path.join(os.path.expanduser(lib), "crux.db")
+                    else:
+                        DB_PATH = os.path.join(CONFIG_DIR, "crux.db")
+                LMSTUDIO_URL = _config["llm"]["url"]
+                LMSTUDIO_MODEL = _config["llm"]["model"]
+                LLM_API_KEY = _config["llm"].get("api_key", "")
+                KIT_SLOTS = _config["ui"]["kit_slots"]
+                PAGE_SIZE = _config["ui"]["samples_per_page"]
+                self.db.close()
+                self.db = DB()
+                self.db.connect()
+                self._kit = [None] * KIT_SLOTS
+                self._kit_locked = [False] * KIT_SLOTS
+                self.load_stats()
+                self.search(self._query)
+                self.render_kit()
+                self.set_status("Settings saved")
+        self.push_screen(SettingsScreen(), _on_settings_done)
+    
+    def action_focus_next(self):
+        self.screen.focus_next()
+
+# ─── Entry ────────────────────────────────────────────────────────────────────
+def main():
+    import_path = None
+    if len(sys.argv) > 1 and sys.argv[1] == "import":
+        import_path = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+    
+    app = CruxApp(import_path=import_path)
+    app.run()
+
+if __name__ == "__main__":
+    main()

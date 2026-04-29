@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+dist/
+build/
+
+# DB files (user data, not code)
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (user-specific)
+.crux/
+
+# Logs
+*.log
+/tmp/
+
+# IDE
+.vscode/
+.idea/
