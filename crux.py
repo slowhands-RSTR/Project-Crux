@@ -83,7 +83,7 @@ def load_config():
 def save_config(cfg):
     """Write config back to config.toml."""
     os.makedirs(CONFIG_DIR, exist_ok=True)
-    lines = ["# ── crüx configuration ──\n", "# Edit this file or use Settings (Ctrl+,)\n", "\n"]
+    lines = ["# ── crüx configuration ──\n", "# Edit this file or use Settings (Ctrl+O)\n", "\n"]
     for section, vals in cfg.items():
         lines.append(f"[{section}]\n")
         for k, v in vals.items():
@@ -557,8 +557,7 @@ class SettingsScreen(Screen):
     
     BINDINGS = [
         Binding("escape", "close_settings", "Close"),
-        Binding("ctrl+,", "save", "Save", priority=True),
-        Binding("cmd+,", "save", "Save", priority=True),
+        Binding("ctrl+o", "save", "Save", priority=True),
     ]
     
     CSS = """
@@ -999,8 +998,7 @@ class CruxApp(App):
         Binding("f5", "refresh", "Refresh"),
         Binding("tab", "focus_next", "Next pane"),
         Binding("p", "play", "Play"),
-        Binding("ctrl+,", "settings", "Settings", priority=True),
-        Binding("cmd+,", "settings", "Settings", priority=True),
+        Binding("ctrl+o", "settings", "Settings", priority=True),
         Binding("ctrl+e", "export", "Export kit"),
 
         Binding("space", "toggle_lock", "Lock/unlock"),
@@ -1088,7 +1086,7 @@ class CruxApp(App):
                 id="content-area",
             ),
             Container(
-                Static("↑↓=browse · enter=add to kit · p=play · space=lock · tab=panes · Ctrl+,=settings"),
+                Static("↑↓=browse · enter=add to kit · p=play · space=lock · tab=panes · Ctrl+O=settings"),
                 id="status-bar",
             ),
             id="main-container",
