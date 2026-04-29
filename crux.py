@@ -1109,11 +1109,17 @@ class CruxApp(App):
             sb = self.query_one("#status-bar")
             sb.styles.background = t["surface"]
             sb.query(Static).first().styles.color = t["dim"]
-            # List items — riff on existing CSS classes doesn't work inline,
-            # so re-render the kit and sample list to pick up new colors
+            # Re-render lists with new colors
             self.render_kit()
             if self._samples:
                 self.search(self._query)
+            # Apply hover/focus CSS rules dynamically for the theme
+            css_overrides = f"""
+            ListItem:hover {{ background: {t['hover']}; }}
+            ListView:focus .list-item--focused {{ background: {t['accent']}26; }}
+            """
+            self.stylesheet.add_stylesheet(css_overrides)
+            self.refresh_css()
         except Exception as e:
             self.set_status(f"theme error: {e}")
     
@@ -1188,6 +1194,7 @@ class CruxApp(App):
         self._samples = await self.db.search(query, PAGE_SIZE)
         lv = self.query_one("#sample-list", ListView)
         lv.clear()
+        t = getattr(self, '_theme', None) or {"fg": "#b8c8c8", "bg": "#0b1a20"}
         for s in self._samples:
             name = s.get("name", "?")
             # Extract parent folder from path for context
@@ -1200,7 +1207,7 @@ class CruxApp(App):
             genre = f" [{s['genre']}]" if s.get("genre") else ""
             tags = (s.get("tags") or [])
             tag_str = " " + " ".join(t[:8] for t in tags[:3]) if tags else ""
-            lv.append(ListItem(Label(f"{name}{folder_tag}{machine}{genre}{bpm}{dur}{tag_str}")))
+            lv.append(ListItem(Label(f"[{t['fg']}]{name}[/]{folder_tag}{machine}{genre}{bpm}{dur}{tag_str}")))
         self._update_search_status()
     
     def on_input_submitted(self, event: Input.Submitted) -> None:
