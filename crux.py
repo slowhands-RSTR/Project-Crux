@@ -558,6 +558,7 @@ class SettingsScreen(Screen):
     BINDINGS = [
         Binding("escape", "close_settings", "Close"),
         Binding("ctrl+,", "save", "Save", priority=True),
+        Binding("cmd+,", "save", "Save", priority=True),
     ]
     
     CSS = """
@@ -999,6 +1000,7 @@ class CruxApp(App):
         Binding("tab", "focus_next", "Next pane"),
         Binding("p", "play", "Play"),
         Binding("ctrl+,", "settings", "Settings", priority=True),
+        Binding("cmd+,", "settings", "Settings", priority=True),
         Binding("ctrl+e", "export", "Export kit"),
 
         Binding("space", "toggle_lock", "Lock/unlock"),
