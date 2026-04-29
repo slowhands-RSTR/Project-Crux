@@ -426,6 +426,41 @@ def analyze_audio(path: str) -> dict:
     
     return features
 
+def render_waveform_ascii(path: str, width: int = 50, height: int = 3) -> str:
+    """Render a waveform as unicode block chars. Returns multi-line string."""
+    try:
+        import librosa
+        import numpy as np
+        y, sr = librosa.load(path, sr=22050, duration=3, mono=True)
+        if len(y) < 100:
+            return ""
+        # Downsample to fit width
+        chunk = len(y) // width
+        envelope = np.array([np.abs(y[i*chunk:(i+1)*chunk]).max() for i in range(width)])
+        # Normalize
+        peak = envelope.max()
+        if peak > 0:
+            envelope = envelope / peak
+        # Block chars: ▁▂▃▄▅▆▇█
+        blocks = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
+        levels = len(blocks) - 1
+        lines = []
+        for row in range(height):
+            threshold = (height - row) / height
+            line = ""
+            for v in envelope:
+                idx = min(int(v * levels), levels)
+                char = blocks[idx]
+                # Only show blocks above this row's threshold
+                if v >= threshold:
+                    line += char
+                else:
+                    line += " "
+            lines.append(line)
+        return "\n".join(lines)
+    except:
+        return ""
+
 # ─── Import Pipeline ─────────────────────────────────────────────────────────
 AUDIO_EXTS = {".wav", ".mp3", ".aiff", ".aif", ".flac", ".ogg", ".m4a"}
 
@@ -894,6 +929,14 @@ class CruxApp(App):
         border-right: solid #1a3a45;
         height: 100%;
     }
+    #waveform-view {
+        height: 4;
+        background: #0b1a20;
+        border-bottom: solid #1a3a45;
+        padding: 0 1;
+        color: #1a9e9e;
+        overflow: hidden;
+    }
     #sample-list {
         height: 100%;
         overflow-y: auto;
@@ -1032,6 +1075,7 @@ class CruxApp(App):
                 id="prompt-bar",
             ),
             Container(
+                Static("", id="waveform-view"),
                 Container(
                     ListView(id="sample-list"),
                     id="sample-panel",
@@ -1308,6 +1352,17 @@ class CruxApp(App):
             self.set_status(j.get("message", "ok"))
     
     # ─── Kit ─────────────────────────────────────────────────────────────────
+    def _show_waveform(self, path: str, name: str):
+        """Render an ASCII waveform for the given audio file."""
+        wf = self.query_one("#waveform-view", Static)
+        # Get terminal width for waveform size
+        try:
+            cols = os.get_terminal_size().columns
+            width = min(cols // 2 - 4, 60)  # Fit in left panel, max 60
+        except:
+            width = 50
+        wf.renderable = render_waveform_ascii(path, width=width, height=3) or ""
+    
     def render_kit(self):
         lv = self.query_one("#kit-grid", ListView)
         lv.clear()
@@ -1357,10 +1412,11 @@ class CruxApp(App):
             idx = lv.index
             if idx is not None and 0 <= idx < len(self._samples):
                 s = self._samples[idx]
-                # Preview on click/select, don't add to kit
+                # Show waveform + preview on select
                 path = s.get("path", "")
                 if path and os.path.exists(path):
                     subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self._show_waveform(path, s.get('name','?'))
                     self.set_status(f"▶ {s['name']}")
     
     def _advance_kit_slot(self):
