@@ -1445,23 +1445,29 @@ class CruxApp(App):
                 path = s.get("path", "")
                 if path and os.path.exists(path):
                     self._show_waveform(path, s.get('name','?'))
-                    self.set_status(f"{s['name']}")
+                target = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
+                self.set_status(f"{s['name']}  ·  Enter → {target}")
     
     def on_list_view_selected(self, event: ListView.Selected) -> None:
-        """Enter key — add sample to kit from browse. Nothing on kit-grid (arrow keys + space)."""
+        """Enter key — set target slot from kit-grid, or add sample from browse."""
         lv = event.list_view
         if lv.id == "kit-grid":
-            # Enter on kit slot — do nothing, arrow keys handle selection + audition
-            return
+            idx = lv.index
+            if idx is not None and 0 <= idx < KIT_SLOTS:
+                self._kit_index = idx
+                self.render_kit()
+                slot_name = SLOT_NAMES[idx] if idx < len(SLOT_NAMES) else f"Slot {idx+1}"
+                self.set_status(f"→ targeting: {slot_name}  (Tab to browse, Enter to add)")
         elif lv.id == "sample-list":
             idx = lv.index
             if idx is not None and 0 <= idx < len(self._samples):
                 s = self._samples[idx]
+                slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
                 self._kit[self._kit_index] = s
                 self._advance_kit_slot()
                 self.render_kit()
-                slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
-                self.set_status(f"added {s['name']} → {slot_name}")
+                next_slot = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
+                self.set_status(f"{s['name']} → {slot_name}  |  next: {next_slot}")
     
     def _play_audio(self, path: str):
         """Play audio, killing any previous playback to prevent bleed."""
