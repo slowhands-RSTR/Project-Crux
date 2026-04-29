@@ -1094,7 +1094,7 @@ class CruxApp(App):
                 id="content-area",
             ),
             Container(
-                Static("↑↓/jk=navigate · enter=add to kit · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
+                Static("↑↓/jk=navigate · enter=add · delete=clear · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
                 id="status-bar",
             ),
             id="main-container",
