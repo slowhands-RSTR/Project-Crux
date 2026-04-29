@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-crüx — sample curation TUI
+crux — sample curation TUI
 ───────────────────────────
 A keyboard-first prompt-driven sample browser + kit builder.
 Powered by FTS5 search + LM Studio for smart curation.
@@ -83,7 +83,7 @@ def load_config():
 def save_config(cfg):
     """Write config back to config.toml."""
     os.makedirs(CONFIG_DIR, exist_ok=True)
-    lines = ["# ── crüx configuration ──\n", "# Edit this file or use Settings (Ctrl+S)\n", "\n"]
+    lines = ["# ── crux configuration ──\n", "# Edit this file or use Settings (Ctrl+S)\n", "\n"]
     for section, vals in cfg.items():
         lines.append(f"[{section}]\n")
         for k, v in vals.items():
@@ -597,7 +597,7 @@ class SettingsScreen(Screen):
         gen = self.cfg.get("general", {})
         prov = llm.get("provider", "lm_studio")
         yield ScrollableContainer(
-            Static("╔═ crüx Settings ═══════════════════════", classes="shdr"),
+            Static("╔═ crux Settings ═══════════════════════", classes="shdr"),
             Static("Provider", classes="slbl"),
             Horizontal(
                 Button("LM Studio", id="p-lm_studio"),
@@ -1069,7 +1069,7 @@ class CruxApp(App):
     def compose(self):
         yield Container(
             Container(
-                Static("◇ crüx"),
+                Static("◇ crux"),
                 id="header-bar",
             ),
             Container(
@@ -1118,7 +1118,7 @@ class CruxApp(App):
     def _update_header(self):
         try:
             hdr = self.query_one("#header-bar", Container).query(Static).first()
-            hdr.update(f"◇ crüx  │  {self._stats['total']} samples  │  {self._stats['tagged']} tagged")
+            hdr.update(f"◇ crux  │  {self._stats['total']} samples  │  {self._stats['tagged']} tagged")
         except:
             pass
     
@@ -1324,7 +1324,7 @@ class CruxApp(App):
         
         context_note = f'Genre-matched' if has_genre_match else 'No exact genre matches — using diverse samples'
         
-        sys_msg = {'role': 'system', 'content': f'You are crüx, a sample curator. Use spectral audio features to match samples to slots. {context_note}.'}
+        sys_msg = {'role': 'system', 'content': f'You are crux, a sample curator. Use spectral audio features to match samples to slots. {context_note}.'}
         user_msg = {'role': 'user', 'content': f'Request: "{prompt}"\n\nSLOT GUIDE (spectral expectations):\n{slot_guide_str}\n\nAll slots: {slot_spec}\n\nCANDIDATES ({len(all_candidates)}):\n{candidates}\n\nAssign EVERY slot (0 through {KIT_SLOTS-1}) the best matching candidate. Fill ALL {KIT_SLOTS} slots — leave none empty. Use spectral character to match each slot type. JSON: {{"action":"kit","slots":[{{"slot":0,"sampleId":"id"}},{{"slot":1,"sampleId":"id"}}...ALL {KIT_SLOTS} SLOTS],"name":"..."}}. Return ONLY JSON with exactly {KIT_SLOTS} slot entries.'}
         
         resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1500)
@@ -1594,7 +1594,7 @@ class CruxApp(App):
                 else:
                     kit_str += f"{i}:{lock}{label}=— "
             
-            sys_msg = {'role': 'system', 'content': 'You are crüx, a sample curation engine. Use spectral features to guide slot matching.'}
+            sys_msg = {'role': 'system', 'content': 'You are crux, a sample curation engine. Use spectral features to guide slot matching.'}
             user_msg = {'role': 'user', 'content': f'Refine "{direction}"\nKit so far: {kit_str}\nONLY refine these specific slots: {target_slots}\nCandidates:\n{cand_str}\nReturn JSON with exactly {len(target_slots)} entries: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}},...]}}'}
             
             resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1500)
