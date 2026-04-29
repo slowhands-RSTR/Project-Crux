@@ -1309,23 +1309,40 @@ class CruxApp(App):
             tag_str = ' '.join(tags[:4])
             machine = s.get('machine') or ''
             folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
-            candidates += f"{s['id']}: {s['name']} | [{folder}] | {tag_str} | {machine} | {char}\n"
+            # Extract likely slot type from filename (primary indicator)
+            fname = (s.get("name") or "").lower()
+            slot_hint = ""
+            for hint_word, hint_slot in [
+                ("kick", "KICK"), ("kik", "KICK"), ("bd", "KICK"),
+                ("snare", "SNARE"), ("snr", "SNARE"), ("sna", "SNARE"),
+                ("hat", "HAT"), ("hihat", "HAT"), ("hi-hat", "HAT"), ("hh", "HAT"),
+                ("clap", "CLAP"),
+                ("perc", "PERC"), ("tamb", "PERC"), ("shaker", "PERC"),
+                ("tom", "TOM"),
+                ("ride", "RIDE"),
+                ("crash", "CRASH"), ("cymbal", "CRASH"),
+                ("rim", "PERC"), ("click", "PERC"),
+            ]:
+                if hint_word in fname:
+                    slot_hint = f" [{hint_slot}]"
+                    break
+            candidates += f"{s['id']}: {s['name']}{slot_hint} | {machine} | {folder} | {tag_str} | {char}\n"
         
         # Per-slot spectral guidance for the LLM
         slot_guide = {
-            0: "Kick — expect low centroid (<1500Hz), high RMS (loud), sharp onset, percussive, very short",
-            1: "Snare — medium centroid (1500-3000Hz), moderate RMS, sharp onset, noise-tinged flatness",
-            2: "Hat — high centroid (>2500Hz), low-moderate RMS, very short, noisy flatness",
-            3: "Clap — mid-high centroid, moderate RMS, sharp onset, noise burst, short decay",
-            4: "Perc — varies widely, look for short hits with distinct character",
+            0: "Kick — low centroid (<1500Hz), high RMS, sharp onset, very short",
+            1: "Snare — medium centroid (1500-3000Hz), moderate RMS, sharp onset, noise tail",
+            2: "Hat — high centroid (>2500Hz), low RMS, very short, noisy",
+            3: "Clap — mid-high centroid, moderate RMS, sharp onset, noise burst",
+            4: "Perc — varies widely",
         }
         slot_spec = ', '.join(f"{i}={SLOT_NAMES[i] if i < len(SLOT_NAMES) else f'Slot{i+1}'}" for i in range(KIT_SLOTS))
         slot_guide_str = '\n'.join(f"Slot {k}: {v}" for k, v in slot_guide.items() if k < KIT_SLOTS)
         
         context_note = f'Genre-matched' if has_genre_match else 'No exact genre matches — using diverse samples'
         
-        sys_msg = {'role': 'system', 'content': f'You are crüx, a sample curator. Use spectral audio features to match samples to slots. {context_note}.'}
-        user_msg = {'role': 'user', 'content': f'Request: "{prompt}"\n\nSLOT GUIDE (spectral expectations):\n{slot_guide_str}\n\nAll slots: {slot_spec}\n\nCANDIDATES ({len(all_candidates)}):\n{candidates}\n\nAssign EVERY slot (0 through {KIT_SLOTS-1}) the best matching candidate. Fill ALL {KIT_SLOTS} slots — leave none empty. Use spectral character to match each slot type. JSON: {{"action":"kit","slots":[{{"slot":0,"sampleId":"id"}},{{"slot":1,"sampleId":"id"}}...ALL {KIT_SLOTS} SLOTS],"name":"..."}}. Return ONLY JSON with exactly {KIT_SLOTS} slot entries.'}
+        sys_msg = {'role': 'system', 'content': f'You are crüx, a sample curator. Match samples to slots by filename FIRST, then confirm with spectral features.'}
+        user_msg = {'role': 'user', 'content': f'Request: "{prompt}"\n\nDECISION RULES (priority order):\n1. FILENAME is the PRIMARY indicator — if a filename says "kick", it belongs in the Kick slot.\n2. Spectral features are SECONDARY — use them to confirm the filename match or break ties.\n3. Never put a Ride sample in a Hat slot just because both are cymbals.\n\nSLOT GUIDE (spectral expectations):\n{slot_guide_str}\n\nAll slots: {slot_spec}\n\nCANDIDATES ({len(all_candidates)}):\n{candidates}\n\nAssign EVERY slot (0 through {KIT_SLOTS-1}) the best matching candidate. Fill ALL {KIT_SLOTS} slots — leave none empty. Use filename as primary signal, spectral as confirmation. JSON: {{"action":"kit","slots":[{{"slot":0,"sampleId":"id"}},{{"slot":1,"sampleId":"id"}}...ALL {KIT_SLOTS} SLOTS],"name":"..."}}. Return ONLY JSON with exactly {KIT_SLOTS} slot entries.'}
         
         resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1500)
         if not resp:
@@ -1582,7 +1599,24 @@ class CruxApp(App):
                     "onset_confidence": s.get("onset_confidence"),
                 }
                 char = describe_audio(feats_dict)
-                cand_str += f"{s['id']}: {s['name']} | {tags} | {s.get('genre') or '-'} | {char}\n"
+                # Extract filename slot hint
+                fname = (s.get("name") or "").lower()
+                slot_hint = ""
+                for hint_word, hint_slot in [
+                    ("kick", "KICK"), ("kik", "KICK"), ("bd", "KICK"),
+                    ("snare", "SNARE"), ("snr", "SNARE"), ("sna", "SNARE"),
+                    ("hat", "HAT"), ("hihat", "HAT"), ("hh", "HAT"),
+                    ("clap", "CLAP"),
+                    ("perc", "PERC"), ("tamb", "PERC"), ("shaker", "PERC"),
+                    ("tom", "TOM"),
+                    ("ride", "RIDE"),
+                    ("crash", "CRASH"), ("cymbal", "CRASH"),
+                    ("rim", "PERC"), ("click", "PERC"),
+                ]:
+                    if hint_word in fname:
+                        slot_hint = f" [{hint_slot}]"
+                        break
+                cand_str += f"{s['id']}: {s['name']}{slot_hint} | {tags} | {s.get('genre') or '-'} | {char}\n"
             
             kit_str = ""
             for i in range(KIT_SLOTS):
@@ -1594,8 +1628,8 @@ class CruxApp(App):
                 else:
                     kit_str += f"{i}:{lock}{label}=— "
             
-            sys_msg = {'role': 'system', 'content': 'You are crüx, a sample curation engine. Use spectral features to guide slot matching.'}
-            user_msg = {'role': 'user', 'content': f'Refine "{direction}"\nKit so far: {kit_str}\nONLY refine these specific slots: {target_slots}\nCandidates:\n{cand_str}\nReturn JSON with exactly {len(target_slots)} entries: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}},...]}}'}
+            sys_msg = {'role': 'system', 'content': 'You are crüx, a sample curator. Match by filename FIRST, confirm with spectral features.'}
+            user_msg = {'role': 'user', 'content': f'Refine "{direction}"\nRULES: Filename is primary slot indicator. Spectral features confirm the match.\nKit so far: {kit_str}\nONLY refine these specific slots: {target_slots}\nCandidates:\n{cand_str}\nReturn JSON with exactly {len(target_slots)} entries: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}},...]}}'}
             
             resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1500)
             if not resp:
