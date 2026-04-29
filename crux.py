@@ -658,7 +658,7 @@ class SettingsScreen(Screen):
             Select(
                 [(t, t.capitalize()) for t in ("shark", "amber", "matrix", "paper")],
                 prompt="Theme",
-                value=self.cfg.get("ui",{}).get("theme","shark"),
+                value={"default": "shark"}.get(self.cfg.get("ui",{}).get("theme","shark"), self.cfg.get("ui",{}).get("theme","shark")),
                 id="s-theme",
             ),
             Static("", id="s-result"),
