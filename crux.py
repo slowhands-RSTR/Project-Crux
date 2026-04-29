@@ -1069,7 +1069,7 @@ class CruxApp(App):
     def compose(self):
         yield Container(
             Container(
-                Static("▲▸ crüx"),
+                Static("▲ ▴ crüx"),
                 id="header-bar",
             ),
             Container(
@@ -1118,7 +1118,7 @@ class CruxApp(App):
     def _update_header(self):
         try:
             hdr = self.query_one("#header-bar", Container).query(Static).first()
-            hdr.update(f"▲▸ crüx  │  {self._stats['total']} samples  │  {self._stats['tagged']} tagged")
+            hdr.update(f"▲ ▴ crüx  │  {self._stats['total']} samples  │  {self._stats['tagged']} tagged")
         except:
             pass
     
