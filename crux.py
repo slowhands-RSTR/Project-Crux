@@ -1061,25 +1061,53 @@ class CruxApp(App):
         self._current_audio: Optional[subprocess.Popen] = None
     
     def load_theme(self):
-        """Apply the selected theme from config."""
+        """Apply the selected theme from config to all panels via inline styles."""
         theme = _config.get("ui", {}).get("theme", "default").lower()
         themes = {
-            "default": {"bg": "#0b1a20", "surface": "#0f2128", "fg": "#b8c8c8", "accent": "#1a9e9e"},
-            "shark":   {"bg": "#0b1a20", "surface": "#0f2128", "fg": "#b8c8c8", "accent": "#1a9e9e"},
-            "amber":   {"bg": "#1a0e00", "surface": "#2a1800", "fg": "#d4a030", "accent": "#ffb000"},
-            "matrix":  {"bg": "#000000", "surface": "#0a0a0a", "fg": "#00cc00", "accent": "#00ff41"},
-            "paper":   {"bg": "#f5f0e0", "surface": "#ede5d5", "fg": "#5c4b37", "accent": "#8b6914"},
+            "default": {"bg": "#0b1a20", "surface": "#0f2128", "surface2": "#152a33", "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45", "dim": "#5a8a8a", "muted": "#3a5a65"},
+            "shark":   {"bg": "#0b1a20", "surface": "#0f2128", "surface2": "#152a33", "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45", "dim": "#5a8a8a", "muted": "#3a5a65"},
+            "amber":   {"bg": "#1a0e00", "surface": "#2a1800", "surface2": "#3a2400", "fg": "#d4a030", "accent": "#ffb000", "border": "#5a3a00", "dim": "#8a6a20", "muted": "#6a4a10"},
+            "matrix":  {"bg": "#000000", "surface": "#0a0a0a", "surface2": "#0a1a0a", "fg": "#00cc00", "accent": "#00ff41", "border": "#003a00", "dim": "#008800", "muted": "#005500"},
+            "paper":   {"bg": "#f5f0e0", "surface": "#ede5d5", "surface2": "#e3d9c7", "fg": "#5c4b37", "accent": "#8b6914", "border": "#cfc0aa", "dim": "#7a6a52", "muted": "#b09878"},
         }
         t = themes.get(theme, themes["default"])
         try:
             self.screen.styles.background = t["bg"]
-            self.query_one("#header-bar").styles.background = t["surface"]
-            self.query_one("#header-bar").query(Static).first().styles.color = t["accent"]
-            self.query_one("#status-bar").styles.background = t["surface"]
-            self.query_one("#kit-panel").styles.background = t["surface"]
+            # Header
+            hdr = self.query_one("#header-bar")
+            hdr.styles.background = t["surface"]
+            hdr.query(Static).first().styles.color = t["accent"]
+            # Prompt bar
+            pb = self.query_one("#prompt-bar")
+            pb.styles.background = t["surface"]
+            pi = self.query_one("#prompt-input")
+            pi.styles.background = t["bg"]
+            pi.styles.color = t["fg"]
+            pi.styles.border = ("solid", t["border"])
+            # Waveform
+            wb = self.query_one("#waveform-bar")
+            wb.styles.background = t["bg"]
+            wb.styles.border_bottom = ("solid", t["border"])
+            wv = self.query_one("#waveform-view")
+            wv.styles.color = t["accent"]
+            # Panels
             self.query_one("#sample-panel").styles.background = t["bg"]
-        except:
-            pass
+            self.query_one("#sample-panel").styles.border_right = ("solid", t["border"])
+            self.query_one("#kit-panel").styles.background = t["surface"]
+            # Kit input (if present)
+            try:
+                ki = self.query_one("#kit-input")
+                ki.styles.background = t["bg"]
+                ki.styles.color = t["fg"]
+                ki.styles.border = ("solid", t["border"])
+            except:
+                pass
+            # Status
+            sb = self.query_one("#status-bar")
+            sb.styles.background = t["surface"]
+            sb.query(Static).first().styles.color = t["dim"]
+        except Exception as e:
+            self.set_status(f"theme error: {e}")
     
     def compose(self):
         yield Container(
