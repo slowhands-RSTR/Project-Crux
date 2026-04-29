@@ -567,11 +567,14 @@ class SettingsScreen(Screen):
         super().__init__()
         self.cfg = load_config()
         self._dirty = False
-        t = theme_colors or {
+        self._theme = theme_colors or {
             "bg": "#0b1a20", "surface": "#0f2128", "surface2": "#152a33",
             "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45",
             "dim": "#5a8a8a", "muted": "#3a5a65",
         }
+    
+    def on_mount(self):
+        t = self._theme
         css = f"""
         SettingsScreen {{ background: {t['bg']}; }}
         #settings-wrap {{ width: 60; height: 100%; margin: 1 2; }}
