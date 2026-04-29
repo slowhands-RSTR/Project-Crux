@@ -553,80 +553,41 @@ class KitRefined(Message):
 
 # ─── Settings Screen ──────────────────────────────────────────────────────────
 class SettingsScreen(Screen):
-    """Configure LLM provider and paths — simple, no custom CSS fights."""
+    """Configure LLM provider and paths."""
     
     BINDINGS = [
         Binding("escape", "close_settings", "Close"),
         Binding("ctrl+s", "save", "Save", priority=True),
     ]
     
-    CSS = """
-    SettingsScreen {
-        background: #0b1a20;
-    }
-    #settings-wrap {
-        width: 60;
-        height: 100%;
-        margin: 1 2;
-    }
-    .shdr {
-        color: #1a9e9e;
-        text-style: bold;
-        height: 2;
-    }
-    .slbl {
-        color: #b8c8c8;
-        height: 2;
-    }
-    Input {
-        background: #0f2128;
-        color: #e8f0f0;
-        border: solid #1a3a45;
-        height: 3;
-    }
-    Input:focus {
-        border: solid #1a9e9e;
-    }
-    Button {
-        background: #152a33;
-        color: #b8c8c8;
-        border: solid #1a3a45;
-        height: 3;
-        min-width: 14;
-    }
-    Button:hover {
-        border: solid #1a9e9e;
-    }
-    Button.primary {
-        background: #1a9e9e;
-        color: #0b1a20;
-    }
-    #prov-btns {
-        layout: horizontal;
-        height: 4;
-        margin: 0 0 1 0;
-    }
-    #prov-btns Button {
-        width: 1fr;
-        min-width: 12;
-    }
-    #s-actions {
-        height: 4;
-        margin-top: 1;
-    }
-    #s-result {
-        color: #5a8a8a;
-        height: 2;
-    }
-    """
-    
     def action_close_settings(self):
         self.dismiss(None)
     
-    def __init__(self):
+    def __init__(self, theme_colors=None):
         super().__init__()
         self.cfg = load_config()
         self._dirty = False
+        t = theme_colors or {
+            "bg": "#0b1a20", "surface": "#0f2128", "surface2": "#152a33",
+            "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45",
+            "dim": "#5a8a8a", "muted": "#3a5a65",
+        }
+        css = f"""
+        SettingsScreen {{ background: {t['bg']}; }}
+        #settings-wrap {{ width: 60; height: 100%; margin: 1 2; }}
+        .shdr {{ color: {t['accent']}; text-style: bold; height: 2; }}
+        .slbl {{ color: {t['dim']}; height: 2; }}
+        Input {{ background: {t['surface']}; color: {t['fg']}; border: solid {t['border']}; height: 3; }}
+        Input:focus {{ border: solid {t['accent']}; }}
+        Button {{ background: {t['surface2']}; color: {t['fg']}; border: solid {t['border']}; height: 3; min-width: 14; }}
+        Button:hover {{ border: solid {t['accent']}; }}
+        Button.primary {{ background: {t['accent']}; color: {t['bg']}; }}
+        #prov-btns {{ layout: horizontal; height: 4; margin: 0 0 1 0; }}
+        #prov-btns Button {{ width: 1fr; min-width: 12; }}
+        #s-actions {{ height: 4; margin-top: 1; }}
+        #s-result {{ color: {t['dim']}; height: 2; }}
+        """
+        self.stylesheet.add_source(css, tie_breaker=10)
     
     def compose(self):
         llm = self.cfg.get("llm", {})
@@ -1118,7 +1079,7 @@ class CruxApp(App):
             ListItem:hover {{ background: {t['hover']}; }}
             ListView:focus .list-item--focused {{ background: {t['accent']}26; }}
             """
-            self.stylesheet.add_stylesheet(css_overrides)
+            self.stylesheet.add_source(css_overrides, tie_breaker=10)
             self.refresh_css()
         except Exception as e:
             self.set_status(f"theme error: {e}")
@@ -1796,7 +1757,8 @@ class CruxApp(App):
                 self.search(self._query)
                 self.render_kit()
                 self.set_status("Settings saved")
-        self.push_screen(SettingsScreen(), _on_settings_done)
+        t = getattr(self, '_theme', None)
+        self.push_screen(SettingsScreen(theme_colors=t), _on_settings_done)
     
     def action_focus_next(self):
         self.screen.focus_next()
