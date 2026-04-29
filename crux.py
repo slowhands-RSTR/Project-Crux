@@ -1011,8 +1011,8 @@ class CruxApp(App):
 
         Binding("space", "toggle_lock", "Lock/unlock"),
         Binding("delete", "clear_kit_slot", "Clear slot"),
-        Binding("up", "kit_up", "Kit slot ↑"),
-        Binding("down", "kit_down", "Kit slot ↓"),
+        Binding("j", "cursor_down", "↓"),
+        Binding("k", "cursor_up", "↑"),
     ]
     
     def __init__(self, import_path=None):
@@ -1094,7 +1094,7 @@ class CruxApp(App):
                 id="content-area",
             ),
             Container(
-                Static("↑↓=browse · enter=add to kit · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
+                Static("↑↓/jk=navigate · enter=add to kit · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
                 id="status-bar",
             ),
             id="main-container",
@@ -1695,15 +1695,17 @@ class CruxApp(App):
         slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
         self.set_status(f"{slot_name} cleared")
     
-    def action_kit_up(self):
-        if self._kit_index > 0:
-            self._kit_index -= 1
-            self.render_kit()
+    def action_cursor_up(self):
+        """Move cursor up in focused list (Vim k style)."""
+        lv = self.focused
+        if lv and hasattr(lv, "action_cursor_up"):
+            lv.action_cursor_up()
     
-    def action_kit_down(self):
-        if self._kit_index < KIT_SLOTS - 1:
-            self._kit_index += 1
-            self.render_kit()
+    def action_cursor_down(self):
+        """Move cursor down in focused list (Vim j style)."""
+        lv = self.focused
+        if lv and hasattr(lv, "action_cursor_down"):
+            lv.action_cursor_down()
     
     def action_export(self):
         """Open the export modal."""
