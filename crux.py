@@ -581,6 +581,12 @@ class SettingsScreen(Screen):
     def action_close_settings(self):
         self.dismiss(None)
     
+    @staticmethod
+    def _normalize_theme(val: str) -> str:
+        """Normalize theme value, falling back to shark on any invalid value."""
+        valid = {"shark", "amber", "matrix", "paper"}
+        return val if val in valid else "shark"
+
     def __init__(self, theme_colors=None):
         super().__init__()
         self.cfg = load_config()
@@ -616,7 +622,7 @@ class SettingsScreen(Screen):
             Select(
                 [(t.capitalize(), t) for t in ("shark", "amber", "matrix", "paper")],
                 prompt="Theme",
-                value={"default": "shark"}.get(self.cfg.get("ui",{}).get("theme","shark"), self.cfg.get("ui",{}).get("theme","shark")),
+                value=self._normalize_theme(self.cfg.get("ui",{}).get("theme","shark")),
                 id="s-theme",
             ),
             Static("", id="s-result"),
@@ -724,7 +730,8 @@ class SettingsScreen(Screen):
         llm["model"] = self.query_one("#s-model", Input).value.strip()
         llm["api_key"] = self.query_one("#s-key", Input).value.strip()
         self.cfg.setdefault("general", {})["library_path"] = self.query_one("#s-lib", Input).value.strip()
-        self.cfg.setdefault("ui", {})["theme"] = self.query_one("#s-theme", Select).value
+        raw_theme = self.query_one("#s-theme", Select).value
+        self.cfg.setdefault("ui", {})["theme"] = self._normalize_theme(raw_theme)
         save_config(self.cfg)
         self.dismiss(True)
 
