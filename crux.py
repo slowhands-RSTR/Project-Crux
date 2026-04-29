@@ -1003,7 +1003,8 @@ class CruxApp(App):
         Binding("ctrl+q", "quit", "Quit"),
         Binding("escape", "clear_search", "Clear"),
         Binding("f5", "refresh", "Refresh"),
-        Binding("tab", "focus_next", "Next pane"),
+        Binding("tab", "focus_next", "Browse/Kit panes"),
+        Binding("/", "focus_search", "Search"),
         Binding("p", "play", "Play"),
         Binding("ctrl+s", "settings", "Settings", priority=True),
         Binding("ctrl+e", "export", "Export kit"),
@@ -1093,7 +1094,7 @@ class CruxApp(App):
                 id="content-area",
             ),
             Container(
-                Static("↑↓=browse · enter=add to kit · p=play · space=lock · tab=panes · Ctrl+S=settings"),
+                Static("↑↓=browse · enter=add to kit · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
                 id="status-bar",
             ),
             id="main-container",
@@ -1741,7 +1742,27 @@ class CruxApp(App):
         self.push_screen(SettingsScreen(), _on_settings_done)
     
     def action_focus_next(self):
-        self.screen.focus_next()
+        """Cycle focus between sample list and kit grid only (skip prompt input)."""
+        focused_id = self.focused.id if self.focused else None
+        if focused_id == "kit-grid":
+            try:
+                self.query_one("#sample-list", ListView).focus()
+            except:
+                pass
+        else:
+            try:
+                self.query_one("#kit-grid", ListView).focus()
+            except:
+                pass
+    
+    def action_focus_search(self):
+        """Jump to the search/prompt input from anywhere."""
+        try:
+            inp = self.query_one("#prompt-input", Input)
+            inp.focus()
+            inp.action_home()
+        except:
+            pass
 
 # ─── Entry ────────────────────────────────────────────────────────────────────
 def main():
