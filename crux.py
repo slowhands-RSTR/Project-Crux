@@ -48,7 +48,7 @@ def load_config():
             "api_key": "",
         },
         "import": {"recursive": True, "analyze_bpm": True, "analyze_key": False, "audio_formats": ["wav","mp3","aiff","aif","flac","ogg","m4a"], "tag_batch_size": 3},
-        "ui": {"theme": "shark", "samples_per_page": 200, "kit_slots": 16},
+        "ui": {"theme": "default", "samples_per_page": 200, "kit_slots": 16},
     }
     # Parse config.toml manually (Python 3.9 doesn't have tomllib)
     try:
@@ -619,6 +619,9 @@ class SettingsScreen(Screen):
             Static("Library Path", classes="slbl"),
             Input(value=gen.get("library_path", ""), id="s-lib",
                   placeholder="~/Music/Samples"),
+            Static("Theme (shark / amber / matrix / paper)", classes="slbl"),
+            Input(value=self.cfg.get("ui",{}).get("theme","shark"), id="s-theme",
+                  placeholder="shark"),
             Static("", id="s-result"),
             Horizontal(
                 Button("Test", id="s-test"),
@@ -724,8 +727,125 @@ class SettingsScreen(Screen):
         llm["model"] = self.query_one("#s-model", Input).value.strip()
         llm["api_key"] = self.query_one("#s-key", Input).value.strip()
         self.cfg.setdefault("general", {})["library_path"] = self.query_one("#s-lib", Input).value.strip()
+        self.cfg.setdefault("ui", {})["theme"] = self.query_one("#s-theme", Input).value.strip()
         save_config(self.cfg)
         self.dismiss(True)
+
+# ─── Export Screen ────────────────────────────────────────────────────────────
+class ExportScreen(Screen):
+    """Export the current kit to various hardware/DAW formats."""
+    
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+    ]
+    
+    CSS = """
+    ExportScreen { background: #0b1a20; }
+    #export-wrap { width: 60; height: 100%; margin: 1 2; }
+    .ehdr { color: #1a9e9e; text-style: bold; height: 2; }
+    .elbl { color: #b8c8c8; height: 2; }
+    Button {
+        background: #152a33; color: #b8c8c8;
+        border: solid #1a3a45; height: 3; min-width: 14;
+    }
+    Button:hover { border: solid #1a9e9e; }
+    Button.primary { background: #1a9e9e; color: #0b1a20; }
+    #e-result { color: #5a8a8a; height: 2; }
+    """
+    
+    def compose(self):
+        yield ScrollableContainer(
+            Static("╔═ Export Kit ════════════════════════", classes="ehdr"),
+            Static("Format", classes="elbl"),
+            Container(
+                Button("Ableton Drum Rack", id="f-ableton"),
+                Button("SP-404 MKII", id="f-sp404"),
+                Button("MPC 1000", id="f-mpc1k"),
+                Button("MPC 2000 XL", id="f-mpc2k"),
+                id="e-formats",
+            ),
+            Static("", id="e-result"),
+            Horizontal(
+                Button("Export", id="e-export", variant="primary"),
+                Button("Close", id="e-close"),
+            ),
+            id="export-wrap",
+        )
+    
+    def on_mount(self):
+        self._format = "ableton"
+        self._highlight()
+    
+    def _highlight(self):
+        for fid in ("ableton", "sp404", "mpc1k", "mpc2k"):
+            try:
+                btn = self.query_one(f"#f-{fid}", Button)
+                btn.variant = "primary" if fid == self._format else "default"
+            except:
+                pass
+    
+    def on_button_pressed(self, event):
+        btn_id = event.button.id
+        if btn_id and btn_id.startswith("f-"):
+            self._format = btn_id[2:]
+            self._highlight()
+        elif btn_id == "e-export":
+            self._do_export()
+        elif btn_id == "e-close":
+            self.dismiss(None)
+    
+    def action_close(self):
+        self.dismiss(None)
+    
+    def _do_export(self):
+        kit = self.app._kit  # Access the parent app's kit
+        if not any(kit):
+            self.query_one("#e-result", Static).update("Kit is empty — add samples first")
+            return
+        result = self.query_one("#e-result", Static)
+        result.update("Exporting...")
+        self._run_export(kit, result)
+    
+    @work
+    async def _run_export(self, kit, result):
+        import zipfile, io
+        export_dir = os.path.expanduser("~/Desktop/Crux Exports")
+        os.makedirs(export_dir, exist_ok=True)
+        
+        fmt = self._format
+        kit_name = f"crux-kit-{int(time.time())}"
+        zip_path = os.path.join(export_dir, f"{kit_name}_{fmt}.zip")
+        
+        slot_labels = SLOT_NAMES[:KIT_SLOTS]
+        
+        try:
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for i in range(KIT_SLOTS):
+                    s = kit[i]
+                    if not s:
+                        continue
+                    path = s.get("path", "")
+                    if not path or not os.path.exists(path):
+                        continue
+                    label = slot_labels[i] if i < len(slot_labels) else f"Pad{i+1}"
+                    ext = os.path.splitext(path)[1] or ".wav"
+                    
+                    if fmt == "ableton":
+                        arcname = f"{i:02d}_{label}{ext}"
+                    elif fmt == "sp404":
+                        arcname = f"{i:03d}_00{ext}"
+                    elif fmt in ("mpc1k", "mpc2k"):
+                        arcname = f"{i:02d}-{label}{ext}"
+                    else:
+                        arcname = f"{i:02d}_{label}{ext}"
+                    
+                    zf.write(path, arcname)
+            
+            count = sum(1 for i in range(KIT_SLOTS) if kit[i])
+            result.update(f"✓ Exported {count} samples → {zip_path}")
+            result.classes = "s-success"
+        except Exception as e:
+            result.update(f"✗ Export failed: {e}")
 
 # ─── Main App ─────────────────────────────────────────────────────────────────
 class CruxApp(App):
@@ -863,6 +983,7 @@ class CruxApp(App):
         Binding("tab", "focus_next", "Next pane"),
         Binding("p", "play", "Play"),
         Binding("ctrl+s", "settings", "Settings"),
+        Binding("ctrl+e", "export", "Export kit"),
 
         Binding("space", "toggle_lock", "Lock/unlock"),
         Binding("delete", "clear_kit_slot", "Clear slot"),
@@ -882,6 +1003,23 @@ class CruxApp(App):
         self._import_path = import_path
         self._stats = {"total": 0, "tagged": 0}
         self._kit_index = 0
+    
+    def load_theme(self):
+        """Apply the selected theme from config."""
+        theme = _config.get("ui", {}).get("theme", "default")
+        themes = {
+            "default": {"bg": "#0b1a20", "fg": "#b8c8c8", "accent": "#1a9e9e"},
+            "amber":   {"bg": "#1a0e00", "fg": "#d4a030", "accent": "#ffb000"},
+            "matrix":  {"bg": "#000000", "fg": "#00cc00", "accent": "#00ff41"},
+            "paper":   {"bg": "#f5f0e0", "fg": "#5c4b37", "accent": "#8b6914"},
+        }
+        t = themes.get(theme, themes["default"])
+        try:
+            self.screen.styles.background = t["bg"]
+            # Apply to header, footer, etc via CSS variable? For now just screen bg.
+            # Full theme support can be added later with CSS classes.
+        except:
+            pass
     
     def compose(self):
         yield Container(
@@ -907,13 +1045,14 @@ class CruxApp(App):
                 id="content-area",
             ),
             Container(
-                Static("type & enter=search/build/refine · empty enter=add to kit · Ctrl+S=settings · p=play"),
+                Static("↑↓=browse · enter=add to kit · p=play · space=lock · tab=panes · Ctrl+S=settings"),
                 id="status-bar",
             ),
             id="main-container",
         )
     
     def on_mount(self) -> None:
+        self.load_theme()
         self.query_one("#prompt-input", Input).focus()
         self.load_stats()
         self.search("")
@@ -951,13 +1090,17 @@ class CruxApp(App):
         lv.clear()
         for s in self._samples:
             name = s.get("name", "?")
+            # Extract parent folder from path for context
+            fpath = s.get("path", "")
+            folder = os.path.basename(os.path.dirname(fpath)) if fpath else ""
+            folder_tag = f" [dim]{folder}[/]" if folder else ""
             bpm = f" [orange1]{int(s['bpm'])}bpm[/]" if s.get("bpm") else ""
             dur = f" {s.get('duration_ms',0)//1000}s" if s.get("duration_ms") else ""
             machine = f" [cyan]{s['machine']}[/]" if s.get("machine") else ""
             genre = f" [{s['genre']}]" if s.get("genre") else ""
             tags = (s.get("tags") or [])
             tag_str = " " + " ".join(t[:8] for t in tags[:3]) if tags else ""
-            lv.append(ListItem(Label(f"{name}{machine}{genre}{bpm}{dur}{tag_str}")))
+            lv.append(ListItem(Label(f"{name}{folder_tag}{machine}{genre}{bpm}{dur}{tag_str}")))
         self._update_search_status()
     
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -974,6 +1117,11 @@ class CruxApp(App):
                 self.render_kit()
                 slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
                 self.set_status(f"added {s['name']} → {slot_name}")
+            return
+        
+        # /prefix forces direct FTS5 search, bypasses LLM entirely
+        if q.startswith("/"):
+            self.search(q[1:])
             return
         
         first = q.split()[0].lower()
@@ -1006,7 +1154,7 @@ class CruxApp(App):
         self.search(q)
     
     # ─── LLM Commands ────────────────────────────────────────────────────────
-    @work
+    @work(exclusive=True)
     async def run_llm(self, prompt: str) -> None:
         try:
             await self._run_llm_impl(prompt)
@@ -1160,8 +1308,12 @@ class CruxApp(App):
             s = self._kit[i]
             label = SLOT_NAMES[i] if i < len(SLOT_NAMES) else f"Slot {i+1}"
             locked = self._kit_locked[i]
-            cursor = "▸ " if i == self._kit_index else "  "
-            lock_mark = "[bold red]🔒[/]" if locked else "[dim]🔓[/]"
+            active = i == self._kit_index
+            cursor = "▸" if active else " "
+            # Lock status via color only — no emoji
+            label_color = "#e0673a" if locked else "#1a9e9e"
+            cursor_color = "#e0673a" if locked else "#b8c8c8"
+            name_color = "#e0673a" if locked else "#b8c8c8"
             if s:
                 bpm = f" {int(s['bpm'])}bpm" if s.get("bpm") else ""
                 dur = f" {s.get('duration_ms',0)//1000}s" if s.get("duration_ms") else ""
@@ -1169,10 +1321,12 @@ class CruxApp(App):
                 tags = (s.get("tags") or [])
                 tag_str = " " + " ".join(t[:6] for t in tags[:2]) if tags else ""
                 lv.append(ListItem(Label(
-                    f"{cursor}[bold #1a9e9e]{label:>6}[/] {lock_mark} [white]{s['name']}[/]{machine}{bpm}{dur}{tag_str}"
+                    f"[{cursor_color}]{cursor}[/] [bold {label_color}]{label:>6}[/] [{name_color}]{s['name']}[/]{machine}{bpm}{dur}{tag_str}"
                 )))
             else:
-                lv.append(ListItem(Label(f"{cursor}[bold #1a9e9e]{label:>6}[/] 🔓 [italic #3a5a65]— empty[/]")))
+                lv.append(ListItem(Label(
+                    f"[{cursor_color}]{cursor}[/] [bold {label_color}]{label:>6}[/] [italic #3a5a65]— empty[/]"
+                )))
         if lv.children:
             lv.index = min(self._kit_index, len(lv.children) - 1)
     
@@ -1183,15 +1337,24 @@ class CruxApp(App):
             if idx is not None and 0 <= idx < KIT_SLOTS:
                 self._kit_index = idx
                 self.render_kit()
-                self.set_status(f"slot: {SLOT_NAMES[idx] if idx < len(SLOT_NAMES) else f'Slot {idx+1}'}")
+                slot_name = SLOT_NAMES[idx] if idx < len(SLOT_NAMES) else f"Slot {idx+1}"
+                self.set_status(f"slot: {slot_name}")
+                # Preview the sample in this slot
+                s = self._kit[idx]
+                if s:
+                    path = s.get("path", "")
+                    if path and os.path.exists(path):
+                        subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        self.set_status(f"▶ {s['name']}  |  slot: {slot_name}")
         elif lv.id == "sample-list":
             idx = lv.index
             if idx is not None and 0 <= idx < len(self._samples):
                 s = self._samples[idx]
-                self._kit[self._kit_index] = s
-                self._advance_kit_slot()
-                self.render_kit()
-                self.set_status(f"added {s['name']} → {SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f'Slot {self._kit_index+1}'}")
+                # Preview on click/select, don't add to kit
+                path = s.get("path", "")
+                if path and os.path.exists(path):
+                    subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self.set_status(f"▶ {s['name']}")
     
     def _advance_kit_slot(self):
         """Move to next empty kit slot."""
@@ -1305,6 +1468,18 @@ class CruxApp(App):
         self.search(self._query)
     
     def action_play(self):
+        """Play the currently selected sample — from kit slot or sample list."""
+        # Check if kit grid is focused
+        focused_id = self.focused.id if self.focused else None
+        if focused_id == "kit-grid":
+            s = self._kit[self._kit_index] if self._kit_index < len(self._kit) else None
+            if s:
+                path = s.get("path", "")
+                if path and os.path.exists(path):
+                    subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self.set_status(f"▶ slot {s['name']}")
+                    return
+        # Fallback: play from sample list
         lv = self.query_one("#sample-list", ListView)
         idx = lv.index
         if idx is not None and 0 <= idx < len(self._samples):
@@ -1312,7 +1487,7 @@ class CruxApp(App):
             path = s.get("path", "")
             if path and os.path.exists(path):
                 subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                self.set_status(f"▶ playing: {s.get('name','?')}")
+                self.set_status(f"▶ {s.get('name','?')}")
     
     def action_add_to_kit(self):
         """Add highlighted sample from list to the active kit slot."""
@@ -1352,6 +1527,10 @@ class CruxApp(App):
         if self._kit_index < KIT_SLOTS - 1:
             self._kit_index += 1
             self.render_kit()
+    
+    def action_export(self):
+        """Open the export modal."""
+        self.push_screen(ExportScreen())
     
     def action_settings(self):
         """Open the settings modal."""
