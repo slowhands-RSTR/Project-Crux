@@ -1061,35 +1061,23 @@ class CruxApp(App):
         self._current_audio: Optional[subprocess.Popen] = None
     
     def load_theme(self):
-        """Apply the selected theme from config to all panels."""
-        theme = _config.get("ui", {}).get("theme", "default")
+        """Apply the selected theme from config."""
+        theme = _config.get("ui", {}).get("theme", "default").lower()
         themes = {
-            "default": {"bg": "#0b1a20", "surface": "#0f2128", "surface2": "#0b1a20", "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45"},
-            "amber":   {"bg": "#1a0e00", "surface": "#2a1800", "surface2": "#1a0e00", "fg": "#d4a030", "accent": "#ffb000", "border": "#3a2800"},
-            "matrix":  {"bg": "#000000", "surface": "#0a0a0a", "surface2": "#000000", "fg": "#00cc00", "accent": "#00ff41", "border": "#003300"},
-            "paper":   {"bg": "#f5f0e0", "surface": "#ede5d5", "surface2": "#f5f0e0", "fg": "#5c4b37", "accent": "#8b6914", "border": "#cfc0aa"},
+            "default": {"bg": "#0b1a20", "surface": "#0f2128", "fg": "#b8c8c8", "accent": "#1a9e9e"},
+            "shark":   {"bg": "#0b1a20", "surface": "#0f2128", "fg": "#b8c8c8", "accent": "#1a9e9e"},
+            "amber":   {"bg": "#1a0e00", "surface": "#2a1800", "fg": "#d4a030", "accent": "#ffb000"},
+            "matrix":  {"bg": "#000000", "surface": "#0a0a0a", "fg": "#00cc00", "accent": "#00ff41"},
+            "paper":   {"bg": "#f5f0e0", "surface": "#ede5d5", "fg": "#5c4b37", "accent": "#8b6914"},
         }
         t = themes.get(theme, themes["default"])
         try:
             self.screen.styles.background = t["bg"]
-            for sel, style_props in [
-                ("#header-bar", {"background": t["surface"]}),
-                ("#prompt-bar", {"background": t["surface"]}),
-                ("#waveform-bar", {"background": t["surface2"]}),
-                ("#waveform-view", {"color": t["accent"]}),
-                ("#waveform-bar", {"border-bottom": f"solid {t['border']}"}),
-                ("#content-area", {"background": t["bg"]}),
-                ("#sample-panel", {"background": t["surface2"], "border-right": f"solid {t['border']}"}),
-                ("#kit-panel", {"background": t["surface"]}),
-                ("#status-bar", {"background": t["surface"]}),
-                ("#header-bar > Static", {"color": t["accent"]}),
-            ]:
-                try:
-                    w = self.query_one(sel)
-                    for prop, val in style_props.items():
-                        setattr(w.styles, prop.replace("-", "_"), val)
-                except:
-                    pass
+            self.query_one("#header-bar").styles.background = t["surface"]
+            self.query_one("#header-bar").query(Static).first().styles.color = t["accent"]
+            self.query_one("#status-bar").styles.background = t["surface"]
+            self.query_one("#kit-panel").styles.background = t["surface"]
+            self.query_one("#sample-panel").styles.background = t["bg"]
         except:
             pass
     
@@ -1758,6 +1746,7 @@ class CruxApp(App):
                 self._kit = [None] * KIT_SLOTS
                 self._kit_locked = [False] * KIT_SLOTS
                 self.load_stats()
+                self.load_theme()
                 self.search(self._query)
                 self.render_kit()
                 self.set_status("Settings saved")
