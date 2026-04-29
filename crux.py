@@ -891,8 +891,8 @@ class CruxApp(App):
     #main-container {
         height: 100%;
         layout: grid;
-        grid-size: 1 4;
-        grid-rows: auto auto 1fr auto;
+        grid-size: 1 5;
+        grid-rows: auto auto auto 1fr auto;
     }
     #header-bar {
         height: 2;
@@ -929,10 +929,14 @@ class CruxApp(App):
         border-right: solid #1a3a45;
         height: 100%;
     }
-    #waveform-view {
+    #waveform-bar {
         height: 4;
+        width: 100%;
         background: #0b1a20;
         border-bottom: solid #1a3a45;
+    }
+    #waveform-view {
+        height: 100%;
         padding: 0 1;
         color: #1a9e9e;
         overflow: hidden;
@@ -1016,6 +1020,14 @@ class CruxApp(App):
     #import-status { color: #b8c8c8; height: 1; }
     #import-log { height: 14; overflow-y: auto; background: #0b1a20; border: solid #1a3a45; padding: 0 1; }
     #import-log > Static { color: #b8c8c8; }
+    #sample-list, #kit-grid, #import-log {
+        scrollbar-color: #3a5a65;
+        scrollbar-color-hover: #5a7a85;
+    }
+    ListView {
+        scrollbar-color: #3a5a65;
+        scrollbar-color-hover: #5a7a85;
+    }
     """
     
     BINDINGS = [
@@ -1046,28 +1058,45 @@ class CruxApp(App):
         self._import_path = import_path
         self._stats = {"total": 0, "tagged": 0}
         self._kit_index = 0
+        self._current_audio: Optional[subprocess.Popen] = None
     
     def load_theme(self):
-        """Apply the selected theme from config."""
+        """Apply the selected theme from config to all panels."""
         theme = _config.get("ui", {}).get("theme", "default")
         themes = {
-            "default": {"bg": "#0b1a20", "fg": "#b8c8c8", "accent": "#1a9e9e"},
-            "amber":   {"bg": "#1a0e00", "fg": "#d4a030", "accent": "#ffb000"},
-            "matrix":  {"bg": "#000000", "fg": "#00cc00", "accent": "#00ff41"},
-            "paper":   {"bg": "#f5f0e0", "fg": "#5c4b37", "accent": "#8b6914"},
+            "default": {"bg": "#0b1a20", "surface": "#0f2128", "surface2": "#0b1a20", "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45"},
+            "amber":   {"bg": "#1a0e00", "surface": "#2a1800", "surface2": "#1a0e00", "fg": "#d4a030", "accent": "#ffb000", "border": "#3a2800"},
+            "matrix":  {"bg": "#000000", "surface": "#0a0a0a", "surface2": "#000000", "fg": "#00cc00", "accent": "#00ff41", "border": "#003300"},
+            "paper":   {"bg": "#f5f0e0", "surface": "#ede5d5", "surface2": "#f5f0e0", "fg": "#5c4b37", "accent": "#8b6914", "border": "#cfc0aa"},
         }
         t = themes.get(theme, themes["default"])
         try:
             self.screen.styles.background = t["bg"]
-            # Apply to header, footer, etc via CSS variable? For now just screen bg.
-            # Full theme support can be added later with CSS classes.
+            for sel, style_props in [
+                ("#header-bar", {"background": t["surface"]}),
+                ("#prompt-bar", {"background": t["surface"]}),
+                ("#waveform-bar", {"background": t["surface2"]}),
+                ("#waveform-view", {"color": t["accent"]}),
+                ("#waveform-bar", {"border-bottom": f"solid {t['border']}"}),
+                ("#content-area", {"background": t["bg"]}),
+                ("#sample-panel", {"background": t["surface2"], "border-right": f"solid {t['border']}"}),
+                ("#kit-panel", {"background": t["surface"]}),
+                ("#status-bar", {"background": t["surface"]}),
+                ("#header-bar > Static", {"color": t["accent"]}),
+            ]:
+                try:
+                    w = self.query_one(sel)
+                    for prop, val in style_props.items():
+                        setattr(w.styles, prop.replace("-", "_"), val)
+                except:
+                    pass
         except:
             pass
     
     def compose(self):
         yield Container(
             Container(
-                Static("🦈 crüx  │  loading…"),
+                Static("◇ crüx  │  loading…"),
                 id="header-bar",
             ),
             Container(
@@ -1076,6 +1105,9 @@ class CruxApp(App):
             ),
             Container(
                 Static("", id="waveform-view"),
+                id="waveform-bar",
+            ),
+            Container(
                 Container(
                     ListView(id="sample-list"),
                     id="sample-panel",
@@ -1113,7 +1145,7 @@ class CruxApp(App):
     def _update_header(self):
         try:
             hdr = self.query_one("#header-bar", Container).query(Static).first()
-            hdr.update(f"🦈 crüx  │  {self._stats['total']} samples  │  {self._stats['tagged']} tagged")
+            hdr.update(f"◇ crüx  │  {self._stats['total']} samples  │  {self._stats['tagged']} tagged")
         except:
             pass
     
@@ -1171,14 +1203,22 @@ class CruxApp(App):
         first = q.split()[0].lower()
         has_kit = any(s is not None for s in self._kit)
         
-        # Explicit command keywords → LLM build or search
+        # Explicit command keywords → LLM build
         if first in ("build", "make", "create", "new"):
             self.set_status(f"▶ LLM: {q}…")
             self.run_llm(q)
             return
         
+        # Explicit refine commands → kit_refine (no word limit)
+        if first in ("refine", "swap", "change", "replace", "remix"):
+            if has_kit:
+                self.kit_refine(q)
+            else:
+                self.set_status("build a kit first, then refine")
+            return
+        
         # If we have a kit, treat ambiguous input as refine first
-        if has_kit and first in ("darker", "heavier", "softer", "warmer", "brighter", "swap", "more", "less", "dub", "punchier", "cleaner", "looser", "tighter"):
+        if has_kit and first in ("darker", "heavier", "softer", "warmer", "brighter", "more", "less", "dub", "punchier", "cleaner", "looser", "tighter"):
             self.kit_refine(q)
             return
         
@@ -1187,9 +1227,8 @@ class CruxApp(App):
             self.run_llm(q)
             return
         
-        # Has a kit but not recognized → try refine first, fallback to search
+        # Has a kit with short input → try refine, fallback to search
         if has_kit and len(q.split()) <= 3:
-            # Could be a direction, try refine
             self.set_status(f"refining: {q}…")
             self.kit_refine(q)
             return
@@ -1333,8 +1372,18 @@ class CruxApp(App):
                 slots = [{"slot": i, "sampleId": sid} for i, sid in enumerate(ids)]
             name = j.get("name", f"kit-{int(time.time())}")
             self._kit = [None] * KIT_SLOTS
+            # Save locked slots — don't wipe them
+            locked_slots = {}
+            for i in range(KIT_SLOTS):
+                if self._kit_locked[i] and self._kit[i]:
+                    locked_slots[i] = self._kit[i]
+            self._kit = [None] * KIT_SLOTS
             self._kit_locked = [False] * KIT_SLOTS
-            assigned = 0
+            # Restore locked slots
+            for i, s in locked_slots.items():
+                self._kit[i] = s
+                self._kit_locked[i] = True
+            assigned = len(locked_slots)
             for entry in slots:
                 idx = entry.get("slot")
                 sid = entry.get("sampleId")
@@ -1342,14 +1391,19 @@ class CruxApp(App):
                     continue
                 if idx < 0 or idx >= KIT_SLOTS:
                     continue
+                if self._kit_locked[idx]:
+                    continue  # Don't touch locked slots
                 s = await self.db.get_sample(sid)
                 if s:
                     self._kit[idx] = s
                     assigned += 1
             self.render_kit()
             self.set_status(f"built \"{name}\" ({assigned}/{KIT_SLOTS} slots)")
+            # Restore samples in browse pane after LLM completes
+            self.search(self._query)
         else:
             self.set_status(j.get("message", "ok"))
+            self.search(self._query)
     
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str):
@@ -1370,11 +1424,8 @@ class CruxApp(App):
             s = self._kit[i]
             label = SLOT_NAMES[i] if i < len(SLOT_NAMES) else f"Slot {i+1}"
             locked = self._kit_locked[i]
-            active = i == self._kit_index
-            cursor = "▸" if active else " "
-            # Lock status via color only — no emoji
+            # Lock status via color only — no emoji; rely on ListView highlight for selection
             label_color = "#e0673a" if locked else "#1a9e9e"
-            cursor_color = "#e0673a" if locked else "#b8c8c8"
             name_color = "#e0673a" if locked else "#b8c8c8"
             if s:
                 bpm = f" {int(s['bpm'])}bpm" if s.get("bpm") else ""
@@ -1383,41 +1434,69 @@ class CruxApp(App):
                 tags = (s.get("tags") or [])
                 tag_str = " " + " ".join(t[:6] for t in tags[:2]) if tags else ""
                 lv.append(ListItem(Label(
-                    f"[{cursor_color}]{cursor}[/] [bold {label_color}]{label:>6}[/] [{name_color}]{s['name']}[/]{machine}{bpm}{dur}{tag_str}"
+                    f"[bold {label_color}]{label:>6}[/] [{name_color}]{s['name']}[/]{machine}{bpm}{dur}{tag_str}"
                 )))
             else:
                 lv.append(ListItem(Label(
-                    f"[{cursor_color}]{cursor}[/] [bold {label_color}]{label:>6}[/] [italic #3a5a65]— empty[/]"
+                    f"[bold {label_color}]{label:>6}[/] [italic #3a5a65]— empty[/]"
                 )))
         if lv.children:
             lv.index = min(self._kit_index, len(lv.children) - 1)
     
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
+    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
+        """Auto-select slot on arrow key navigation, auto-audition (kit grid only)."""
         lv = event.list_view
         if lv.id == "kit-grid":
             idx = lv.index
             if idx is not None and 0 <= idx < KIT_SLOTS:
                 self._kit_index = idx
-                self.render_kit()
+                # Don't call render_kit() here — ListView's own highlight handles visual
                 slot_name = SLOT_NAMES[idx] if idx < len(SLOT_NAMES) else f"Slot {idx+1}"
-                self.set_status(f"slot: {slot_name}")
-                # Preview the sample in this slot
                 s = self._kit[idx]
                 if s:
                     path = s.get("path", "")
                     if path and os.path.exists(path):
-                        subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        self._play_audio(path)
                         self.set_status(f"▶ {s['name']}  |  slot: {slot_name}")
+                else:
+                    self.set_status(f"slot: {slot_name} (empty)")
         elif lv.id == "sample-list":
             idx = lv.index
             if idx is not None and 0 <= idx < len(self._samples):
                 s = self._samples[idx]
-                # Show waveform + preview on select
+                # Show waveform on arrow navigation — audition on Enter only
                 path = s.get("path", "")
                 if path and os.path.exists(path):
-                    subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     self._show_waveform(path, s.get('name','?'))
-                    self.set_status(f"▶ {s['name']}")
+                    self.set_status(f"{s['name']}")
+    
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Enter key — add sample to kit from browse. Nothing on kit-grid (arrow keys + space)."""
+        lv = event.list_view
+        if lv.id == "kit-grid":
+            # Enter on kit slot — do nothing, arrow keys handle selection + audition
+            return
+        elif lv.id == "sample-list":
+            idx = lv.index
+            if idx is not None and 0 <= idx < len(self._samples):
+                s = self._samples[idx]
+                self._kit[self._kit_index] = s
+                self._advance_kit_slot()
+                self.render_kit()
+                slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
+                self.set_status(f"added {s['name']} → {slot_name}")
+    
+    def _play_audio(self, path: str):
+        """Play audio, killing any previous playback to prevent bleed."""
+        if self._current_audio:
+            try:
+                self._current_audio.kill()
+            except:
+                pass
+        if path and os.path.exists(path):
+            self._current_audio = subprocess.Popen(
+                ["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
     
     def _advance_kit_slot(self):
         """Move to next empty kit slot."""
@@ -1429,24 +1508,80 @@ class CruxApp(App):
     
     def kit_refine(self, direction: str):
         if not direction.strip(): return
-        unlocked = [i for i in range(KIT_SLOTS) if self._kit[i] and not self._kit_locked[i]]
-        if not unlocked:
+        
+        # Detect if user is targeting specific slot(s) by name
+        slot_name_map = {}
+        for i, name in enumerate(SLOT_NAMES):
+            slot_name_map[name.lower()] = i
+            # Also map partial/shorthand
+            if name.lower() == "percussion":
+                slot_name_map["perc"] = i
+        
+        words = direction.lower().split()
+        targeted_slots = set()
+        remaining_words = []
+        for w in words:
+            if w in slot_name_map:
+                targeted_slots.add(slot_name_map[w])
+            else:
+                remaining_words.append(w)
+        
+        if targeted_slots:
+            # Refine mentioned slots (unlocked OR empty), skip locked
+            target = [i for i in targeted_slots if i < KIT_SLOTS and not self._kit_locked[i]]
+            if not target:
+                self.set_status("those slots are locked — unlock to refine")
+                return
+        else:
+            # No specific slot mentioned — refine all unlocked AND empty slots
+            target = [i for i in range(KIT_SLOTS) if not self._kit_locked[i]]
+        
+        if not target:
             self.set_status("all slots locked — unlock some to refine")
             return
-        self.run_kit_refine(direction, unlocked)
+        
+        # Build search query from remaining words (strip filler)
+        stop_words = {"build", "make", "create", "new", "refine", "remix", "swap", "replace", "change",
+                      "the", "a", "an", "with", "of", "for", "in", "to", "my", "it", "up", "out"}
+        search_words = [w for w in remaining_words if w not in stop_words]
+        if search_words:
+            search_query = " ".join(search_words)
+        else:
+            # No meaningful direction — describe what we're targeting
+            slot_names = [SLOT_NAMES[i] if i < len(SLOT_NAMES) else f"slot{i+1}" for i in target]
+            search_query = " ".join(slot_names)
+        
+        self.run_kit_refine(search_query, target)
     
     @work(exclusive=True)
-    async def run_kit_refine(self, direction: str, unlocked: list[int]):
+    async def run_kit_refine(self, direction: str, target_slots: list[int]):
         self.set_status(f"refining: {direction}…")
-        relevant = await self.db.search(direction, 100)
-        locked_ids = set()
-        for i, s in enumerate(self._kit):
-            if s and self._kit_locked[i]:
-                locked_ids.add(s["id"])
+        
+        # Build a targeted search — include slot names from target slots
+        slot_context_words = []
+        for i in target_slots:
+            if i < len(SLOT_NAMES):
+                slot_context_words.append(SLOT_NAMES[i])
+        search_query = direction
+        if slot_context_words:
+            search_query = " ".join(slot_context_words) + " " + direction
+        
+        relevant = await self.db.search(search_query, 100)
+        # Exclude all samples already in the kit (even unlocked) to force fresh picks
+        kit_ids = set()
+        for s in self._kit:
+            if s:
+                kit_ids.add(s["id"])
         candidates = []
         for s in relevant:
-            if s["id"] not in locked_ids:
+            if s["id"] not in kit_ids:
                 candidates.append(s)
+        # If too few candidates, fall back to broader search without slot context
+        if len(candidates) < len(target_slots) * 5:
+            broader = await self.db.search(direction, 100)
+            for s in broader:
+                if s["id"] not in kit_ids and len(candidates) < 100:
+                    candidates.append(s)
         cand_str = ""
         for i, s in enumerate(candidates[:80]):
             tags = " ".join(s.get("tags") or [])[:60]
@@ -1473,7 +1608,7 @@ class CruxApp(App):
                 kit_str += f"{i}:{lock}{label}=— "
         
         sys_msg = {'role': 'system', 'content': 'You are crüx, a sample curation engine. Use spectral features to guide slot matching.'}
-        user_msg = {'role': 'user', 'content': f'Refine "{direction}"\nKit so far: {kit_str}\nUnlocked slots needing refinement: {unlocked}\nCandidates:\n{cand_str}\nReplace the {len(unlocked)} unlocked slots with better matches. Return JSON with exactly {len(unlocked)} entries: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}},...]}}'}
+        user_msg = {'role': 'user', 'content': f'Refine "{direction}"\nKit so far: {kit_str}\nONLY refine these specific slots: {target_slots}\nCandidates:\n{cand_str}\nReturn JSON with exactly {len(target_slots)} entries: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}},...]}}'}
         
         resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1500)
         if not resp:
@@ -1494,7 +1629,9 @@ class CruxApp(App):
                     self._kit[idx] = s
                     count += 1
         self.render_kit()
-        self.set_status(f"refined {count} slots: {direction}")
+        slot_label = "slot" if len(target_slots) == 1 else "slots"
+        self.set_status(f"refined {count} {slot_label}: {direction}")
+        self.search(self._query)
     
     # ─── Import ──────────────────────────────────────────────────────────────
     @work
@@ -1539,7 +1676,7 @@ class CruxApp(App):
             if s:
                 path = s.get("path", "")
                 if path and os.path.exists(path):
-                    subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    self._play_audio(path)
                     self.set_status(f"▶ slot {s['name']}")
                     return
         # Fallback: play from sample list
@@ -1549,7 +1686,7 @@ class CruxApp(App):
             s = self._samples[idx]
             path = s.get("path", "")
             if path and os.path.exists(path):
-                subprocess.Popen(["afplay", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self._play_audio(path)
                 self.set_status(f"▶ {s.get('name','?')}")
     
     def action_add_to_kit(self):
