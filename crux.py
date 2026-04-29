@@ -1069,7 +1069,7 @@ class CruxApp(App):
     def compose(self):
         yield Container(
             Container(
-                Static("◇ crüx  │  loading…"),
+                Static("◇ crüx"),
                 id="header-bar",
             ),
             Container(
@@ -1214,11 +1214,17 @@ class CruxApp(App):
     @work(exclusive=True)
     async def run_llm(self, prompt: str) -> None:
         try:
+            self._status_spinner = True
+            self._spin_task = asyncio.create_task(self._status_spin("LLM working"))
             await self._run_llm_impl(prompt)
         except Exception as e:
             self.set_status(f"LLM error: {e}")
             import traceback
             traceback.print_exc()
+        finally:
+            self._status_spinner = False
+            if hasattr(self, '_spin_task'):
+                self._spin_task.cancel()
     
     async def _run_llm_impl(self, prompt: str) -> None:
         self.set_status(f"LLM: {prompt}…")
@@ -1538,83 +1544,85 @@ class CruxApp(App):
     
     @work(exclusive=True)
     async def run_kit_refine(self, direction: str, target_slots: list[int]):
-        self.set_status(f"refining: {direction}…")
-        
-        # Build a targeted search — include slot names from target slots
-        slot_context_words = []
-        for i in target_slots:
-            if i < len(SLOT_NAMES):
-                slot_context_words.append(SLOT_NAMES[i])
-        search_query = direction
-        if slot_context_words:
-            search_query = " ".join(slot_context_words) + " " + direction
-        
-        relevant = await self.db.search(search_query, 100)
-        # Exclude all samples already in the kit (even unlocked) to force fresh picks
-        kit_ids = set()
-        for s in self._kit:
-            if s:
-                kit_ids.add(s["id"])
-        candidates = []
-        for s in relevant:
-            if s["id"] not in kit_ids:
-                candidates.append(s)
-        # If too few candidates, fall back to broader search without slot context
-        if len(candidates) < len(target_slots) * 5:
-            broader = await self.db.search(direction, 100)
-            for s in broader:
-                if s["id"] not in kit_ids and len(candidates) < 100:
-                    candidates.append(s)
-        cand_str = ""
-        for i, s in enumerate(candidates[:80]):
-            tags = " ".join(s.get("tags") or [])[:60]
-            feats_dict = {
-                "duration_ms": s.get("duration_ms", 0),
-                "bpm": s.get("bpm"),
-                "rms_db": s.get("rms_db"),
-                "spectral_centroid_hz": s.get("spectral_centroid_hz"),
-                "spectral_flatness": s.get("spectral_flatness"),
-                "transient_score": s.get("transient_score"),
-                "onset_confidence": s.get("onset_confidence"),
-            }
-            char = describe_audio(feats_dict)
-            cand_str += f"{s['id']}: {s['name']} | {tags} | {s.get('genre') or '-'} | {char}\n"
-        
-        kit_str = ""
-        for i in range(KIT_SLOTS):
-            s = self._kit[i]
-            lock = "🔒" if self._kit_locked[i] else "🔓"
-            label = SLOT_NAMES[i] if i < len(SLOT_NAMES) else f"Slot{i+1}"
-            if s:
-                kit_str += f"{i}:{lock}{label}={s['name']} "
-            else:
-                kit_str += f"{i}:{lock}{label}=— "
-        
-        sys_msg = {'role': 'system', 'content': 'You are crüx, a sample curation engine. Use spectral features to guide slot matching.'}
-        user_msg = {'role': 'user', 'content': f'Refine "{direction}"\nKit so far: {kit_str}\nONLY refine these specific slots: {target_slots}\nCandidates:\n{cand_str}\nReturn JSON with exactly {len(target_slots)} entries: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}},...]}}'}
-        
-        resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1500)
-        if not resp:
-            self.set_status("LLM offline — can't refine")
-            return
-        j = extract_json(resp)
-        if not j or "reassignments" not in j:
-            self.set_status("no changes suggested")
-            return
-        
-        count = 0
-        for r in j["reassignments"]:
-            idx = r.get("slotIndex")
-            sid = r.get("sampleId")
-            if idx is not None and 0 <= idx < KIT_SLOTS and not self._kit_locked[idx] and sid:
-                s = await self.db.get_sample(sid)
+        self._status_spinner = True
+        self._spin_task = asyncio.create_task(self._status_spin(f"refining: {direction}"))
+        try:
+            slot_context_words = []
+            for i in target_slots:
+                if i < len(SLOT_NAMES):
+                    slot_context_words.append(SLOT_NAMES[i])
+            search_query = direction
+            if slot_context_words:
+                search_query = " ".join(slot_context_words) + " " + direction
+            
+            relevant = await self.db.search(search_query, 100)
+            kit_ids = set()
+            for s in self._kit:
                 if s:
-                    self._kit[idx] = s
-                    count += 1
-        self.render_kit()
-        slot_label = "slot" if len(target_slots) == 1 else "slots"
-        self.set_status(f"refined {count} {slot_label}: {direction}")
-        self.search(self._query)
+                    kit_ids.add(s["id"])
+            candidates = []
+            for s in relevant:
+                if s["id"] not in kit_ids:
+                    candidates.append(s)
+            if len(candidates) < len(target_slots) * 5:
+                broader = await self.db.search(direction, 100)
+                for s in broader:
+                    if s["id"] not in kit_ids and len(candidates) < 100:
+                        candidates.append(s)
+            cand_str = ""
+            for i, s in enumerate(candidates[:80]):
+                tags = " ".join(s.get("tags") or [])[:60]
+                feats_dict = {
+                    "duration_ms": s.get("duration_ms", 0),
+                    "bpm": s.get("bpm"),
+                    "rms_db": s.get("rms_db"),
+                    "spectral_centroid_hz": s.get("spectral_centroid_hz"),
+                    "spectral_flatness": s.get("spectral_flatness"),
+                    "transient_score": s.get("transient_score"),
+                    "onset_confidence": s.get("onset_confidence"),
+                }
+                char = describe_audio(feats_dict)
+                cand_str += f"{s['id']}: {s['name']} | {tags} | {s.get('genre') or '-'} | {char}\n"
+            
+            kit_str = ""
+            for i in range(KIT_SLOTS):
+                s = self._kit[i]
+                lock = "🔒" if self._kit_locked[i] else "🔓"
+                label = SLOT_NAMES[i] if i < len(SLOT_NAMES) else f"Slot{i+1}"
+                if s:
+                    kit_str += f"{i}:{lock}{label}={s['name']} "
+                else:
+                    kit_str += f"{i}:{lock}{label}=— "
+            
+            sys_msg = {'role': 'system', 'content': 'You are crüx, a sample curation engine. Use spectral features to guide slot matching.'}
+            user_msg = {'role': 'user', 'content': f'Refine "{direction}"\nKit so far: {kit_str}\nONLY refine these specific slots: {target_slots}\nCandidates:\n{cand_str}\nReturn JSON with exactly {len(target_slots)} entries: {{"reassignments":[{{"slotIndex":0,"sampleId":"id"}},...]}}'}
+            
+            resp = await llm_chat([sys_msg, user_msg], temperature=0.1, max_tokens=1500)
+            if not resp:
+                self.set_status("LLM offline — can't refine")
+                return
+            j = extract_json(resp)
+            if not j or "reassignments" not in j:
+                self.set_status("no changes suggested")
+                return
+            
+            count = 0
+            for r in j["reassignments"]:
+                idx = r.get("slotIndex")
+                sid = r.get("sampleId")
+                if idx is not None and 0 <= idx < KIT_SLOTS and not self._kit_locked[idx] and sid:
+                    s = await self.db.get_sample(sid)
+                    if s:
+                        self._kit[idx] = s
+                        count += 1
+            self.render_kit()
+            slot_label = "slot" if len(target_slots) == 1 else "slots"
+            self.set_status(f"refined {count} {slot_label}: {direction}")
+            self.search(self._query)
+        finally:
+            self._status_spinner = False
+            if hasattr(self, '_spin_task'):
+                self._spin_task.cancel()
     
     # ─── Import ──────────────────────────────────────────────────────────────
     @work
@@ -1632,6 +1640,18 @@ class CruxApp(App):
     
     def on_status_msg(self, msg: StatusMsg) -> None:
         self.set_status(msg.text)
+    
+    async def _status_spin(self, label: str):
+        """Animate a spinner in the status bar while a background task runs."""
+        chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        i = 0
+        while getattr(self, '_status_spinner', False):
+            self.set_status(f"{chars[i % len(chars)]} {label}")
+            i += 1
+            try:
+                await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                break
     
     def set_status(self, text: str):
         try:
