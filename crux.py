@@ -564,15 +564,17 @@ class SettingsScreen(Screen):
     SettingsScreen { background: #0b1a20; }
     #settings-wrap { width: 60; height: 100%; margin: 1 2; }
     .shdr { color: #1a9e9e; text-style: bold; height: 2; }
-    .slbl { color: #5a8a8a; height: 2; }
-    Input { background: #0f2128; color: #e8f0f0; border: solid #1a3a45; height: 3; }
-    Input:focus { border: solid #1a9e9e; }
-    Button { background: #152a33; color: #b8c8c8; border: solid #1a3a45; height: 3; min-width: 14; }
-    Button:hover { border: solid #1a9e9e; }
-    Button.primary { background: #1a9e9e; color: #0b1a20; }
-    #prov-btns { layout: horizontal; height: 4; margin: 0 0 1 0; }
-    #prov-btns Button { width: 1fr; min-width: 12; }
-    #s-actions { height: 4; margin-top: 1; }
+    .slbl { color: #b8c8c8; height: 2; }
+    SettingsScreen Input { background: #0f2128; color: #e8f0f0; border: solid #1a3a45; height: 3; min-width: 40; }
+    SettingsScreen Input:focus { border: solid #1a9e9e; }
+    SettingsScreen Select { background: #0f2128; color: #e8f0f0; border: solid #1a3a45; min-width: 40; }
+    SettingsScreen Button { background: #152a33; color: #b8c8c8; border: solid #1a3a45; height: 3; min-width: 14; padding: 0 2; }
+    SettingsScreen Button:hover { border: solid #1a9e9e; }
+    SettingsScreen Button.primary { background: #1a9e9e; color: #0b1a20; }
+    #prov-btns { layout: horizontal; height: 5; margin: 0 0 1 0; }
+    #prov-btns Button { width: 1fr; min-width: 12; height: 3; }
+    #s-actions { height: 5; margin-top: 1; }
+    #s-actions Button { height: 3; }
     #s-result { color: #5a8a8a; height: 2; }
     """
     
