@@ -998,7 +998,7 @@ class CruxApp(App):
         Binding("f5", "refresh", "Refresh"),
         Binding("tab", "focus_next", "Next pane"),
         Binding("p", "play", "Play"),
-        Binding("ctrl+s", "settings", "Settings"),
+        Binding("ctrl+s", "settings", "Settings", priority=True),
         Binding("ctrl+e", "export", "Export kit"),
 
         Binding("space", "toggle_lock", "Lock/unlock"),
