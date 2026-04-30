@@ -1445,18 +1445,29 @@ class CruxApp(App):
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
         """Show sample info in waveform bar and kit detail panel."""
-        self.set_status(f"_show_waveform called: {name}")
+        # Build display text
+        lines = [(name or "?")[:60]]
+        if sample:
+            dur = sample.get("duration_ms", 0)
+            dur_str = f"{dur//1000}s" if dur else "—"
+            bpm = f"{int(sample['bpm'])}bpm" if sample.get("bpm") else "—"
+            machine = (sample.get("machine") or "—")[:20]
+            folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else "—"
+            tags = (sample.get("tags") or [])
+            tag_str = " ".join(tags[:6]) if tags else "—"
+            genre = (sample.get("genre") or "—")[:15]
+            lines.append(f"{dur_str}  {bpm}  {machine}")
+            lines.append(f"{folder}  {genre}")
+            lines.append(f"tags: {tag_str}")
+        text = "\n".join(lines)
         try:
-            wf = self.query_one("#waveform-view", Static)
-            wf.renderable = f"▶ {name}"
-        except Exception as e:
-            self.set_status(f"wf error: {e}")
-            return
+            self.query_one("#waveform-view", Static).renderable = text
+        except:
+            pass
         try:
-            kd = self.query_one("#kit-detail", Static)
-            kd.renderable = f"▶ {name}"
-        except Exception as e:
-            self.set_status(f"kd error: {e}")
+            self.query_one("#kit-detail", Static).renderable = text
+        except:
+            pass
     
     def render_kit(self):
         lv = self.query_one("#kit-grid", ListView)
@@ -1490,7 +1501,6 @@ class CruxApp(App):
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         """Auto-select slot on arrow key navigation, auto-audition (kit grid only)."""
         lv = event.list_view
-        self.set_status(f"highlight: {lv.id}")
         if lv.id == "kit-grid":
             idx = lv.index
             if idx is not None and 0 <= idx < KIT_SLOTS:
@@ -1815,28 +1825,53 @@ class CruxApp(App):
         slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
         self.set_status(f"{slot_name} cleared")
     
+    def _update_detail_for_focused(self):
+        """Update waveform and detail panel for the currently highlighted item."""
+        focused_id = self.focused.id if self.focused else None
+        if focused_id == "kit-grid":
+            idx = self.query_one("#kit-grid", ListView).index
+            if idx is not None and 0 <= idx < KIT_SLOTS:
+                self._kit_index = idx
+                s = self._kit[idx]
+                if s:
+                    path = s.get("path", "")
+                    if path and os.path.exists(path):
+                        self._play_audio(path)
+                        self._show_waveform(path, s.get('name','?'), sample=s)
+        elif focused_id == "sample-list":
+            lv = self.query_one("#sample-list", ListView)
+            idx = lv.index
+            if idx is not None and 0 <= idx < len(self._samples):
+                s = self._samples[idx]
+                path = s.get("path", "")
+                if path and os.path.exists(path):
+                    self._play_audio(path)
+                    self._show_waveform(path, s.get('name','?'), sample=s)
+    
     def action_cursor_up(self):
-        """Move cursor up (Vim k / arrows). Only in lists, not in search input."""
+        """Move cursor up (Vim k / arrows)."""
         if self.focused and self.focused.id == "prompt-input":
-            return  # Let the input handle j/k as text
+            return
         for lid in ("sample-list", "kit-grid"):
             try:
                 lv = self.query_one(f"#{lid}", ListView)
                 if lv.index is not None and lv.index > 0:
                     lv.index -= 1
+                    self._update_detail_for_focused()
                     return
             except:
                 pass
     
     def action_cursor_down(self):
-        """Move cursor down (Vim j / arrows). Only in lists, not in search input."""
+        """Move cursor down (Vim j / arrows)."""
         if self.focused and self.focused.id == "prompt-input":
-            return  # Let the input handle j/k as text
+            return
         for lid in ("sample-list", "kit-grid"):
             try:
                 lv = self.query_one(f"#{lid}", ListView)
                 if lv.index is not None and lv.index < len(lv) - 1:
                     lv.index += 1
+                    self._update_detail_for_focused()
                     return
             except:
                 pass
