@@ -611,10 +611,14 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                 entries = j.get("samples")
                 if entries is None:
                     entries = [j]
-                for entry in entries:
+                for idx, entry in enumerate(entries):
                     sid = entry.get("id", "")
-                    if not sid and len(batch) == 1:
-                        sid = batch[0]["id"]
+                    if not sid and idx < len(batch):
+                        sid = batch[idx]["id"]
+                    elif sid and idx < len(batch):
+                        # Verify the returned ID makes sense; fall back to position
+                        if sid not in (b["id"] for b in batch):
+                            sid = batch[idx]["id"]
                     
                     tags = entry.get("tags", [])
                     # Merge sonics into tags for searchability
