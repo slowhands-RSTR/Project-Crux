@@ -1445,26 +1445,18 @@ class CruxApp(App):
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
         """Show sample info in waveform bar and kit detail panel."""
-        # Build display text from sample data
-        lines = [name[:60]]
-        if sample:
-            dur = sample.get("duration_ms", 0)
-            dur_str = f"{dur//1000}s" if dur else "—"
-            bpm = f"{int(sample['bpm'])}bpm" if sample.get("bpm") else "—"
-            machine = (sample.get("machine") or "—")[:20]
-            folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else "—"
-            tags = (sample.get("tags") or [])
-            tag_str = " ".join(tags[:6]) if tags else "—"
-            genre = (sample.get("genre") or "—")[:15]
-            lines.append(f"{dur_str}  {bpm}  {machine}")
-            lines.append(f"{folder}  {genre}")
-            lines.append(f"tags: {tag_str}")
-        text = "\n".join(lines)
+        self.set_status(f"_show_waveform called: {name}")
         try:
-            self.query_one("#waveform-view", Static).renderable = text
-            self.query_one("#kit-detail", Static).renderable = text
-        except:
-            pass
+            wf = self.query_one("#waveform-view", Static)
+            wf.renderable = f"▶ {name}"
+        except Exception as e:
+            self.set_status(f"wf error: {e}")
+            return
+        try:
+            kd = self.query_one("#kit-detail", Static)
+            kd.renderable = f"▶ {name}"
+        except Exception as e:
+            self.set_status(f"kd error: {e}")
     
     def render_kit(self):
         lv = self.query_one("#kit-grid", ListView)
