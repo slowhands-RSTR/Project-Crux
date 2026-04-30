@@ -42,6 +42,12 @@ Tagging 14,000 samples at batch size 5 (2800 LLM calls):
 
 **Tagging is pausable:** `Ctrl+T` starts. `Ctrl+T` again pauses after the current batch. `Ctrl+T` again resumes where it left off. Safe to close the app and resume later — it only tags still-untagged samples.
 
+**Retag with a different model:** To re-run tagging with a new model, clear existing tags first:
+```bash
+sqlite3 ~/.crux/crux.db "UPDATE samples SET tags='[]', ai_notes=NULL;"
+```
+Then switch models in Settings (`Ctrl+S`) and press `Ctrl+T` to start fresh.
+
 ## Architecture
 
 - **Single-file Python** (~2100 lines) using [Textual](https://textual.textualize.io/)
