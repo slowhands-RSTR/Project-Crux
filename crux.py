@@ -937,11 +937,11 @@ class CruxApp(App):
         padding: 0 0 0 1;
     }}
     #kit-grid {{
-        height: 18;
+        height: auto;
         overflow-y: auto;
     }}
     #kit-grid ListView {{
-        height: 100%;
+        height: auto;
         border: none;
         background: transparent;
     }}
@@ -1465,7 +1465,13 @@ class CruxApp(App):
             tags = (sample.get("tags") or [])
             tag_str = " ".join(tags[:6]) if tags else "—"
             genre = sample.get("genre") or ""
-            detail_text = f"{name}\n{dur_str}  {bpm}  {machine}\n{folder}  {genre}\ntags: {tag_str}"
+            # Escape brackets for Textual Rich markup
+        safe_name = name.replace("[", "(").replace("]", ")")
+        safe_folder = folder.replace("[", "(").replace("]", ")")
+        safe_machine = machine.replace("[", "(").replace("]", ")")
+        safe_tag_str = tag_str.replace("[", "(").replace("]", ")")
+        safe_genre = genre.replace("[", "(").replace("]", ")")
+        detail_text = f"{safe_name}\n{dur_str}  {bpm}  {safe_machine}\n{safe_folder}  {safe_genre}\ntags: {safe_tag_str}"
         try:
             self.query_one("#kit-detail", Static).renderable = detail_text
         except:
