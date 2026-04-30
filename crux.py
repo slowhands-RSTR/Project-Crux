@@ -215,7 +215,8 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+        connector = aiohttp.TCPConnector(force_close=True, limit=0)
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
             async with session.post(url, json={
                 "model": model,
                 "messages": messages,
