@@ -898,7 +898,7 @@ class CruxApp(App):
         height: 100%;
     }}
     #waveform-bar {{
-        height: 4;
+        height: 7;
         width: 100%;
         background: $bg;
         border-bottom: solid $border;
@@ -1444,7 +1444,14 @@ class CruxApp(App):
     
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
-        """Show sample info in waveform bar and kit detail panel."""
+        """Show waveform + sample info in top bar and kit detail panel."""
+        # Build waveform + metadata text
+        try:
+            cols = os.get_terminal_size().columns
+            width = min(cols // 2 - 4, 50)
+        except:
+            width = 40
+        waveform = render_waveform_ascii(path, width=width, height=3) or ""
         lines = [(name or "?")[:60]]
         if sample:
             dur = sample.get("duration_ms", 0)
@@ -1458,13 +1465,16 @@ class CruxApp(App):
             lines.append(f"{dur_str}  {bpm}  {machine}")
             lines.append(f"{folder}  {genre}")
             lines.append(f"tags: {tag_str}")
-        text = "\n".join(lines)
+        meta = "\n".join(lines)
+        # Top bar: waveform above, metadata below
+        top_text = f"{waveform}\n{meta}" if waveform else meta
         try:
-            self.query_one("#waveform-view", Static).update(text)
+            self.query_one("#waveform-view", Static).update(top_text)
         except:
             pass
+        # Kit detail: metadata only (saves space)
         try:
-            self.query_one("#kit-detail", Static).update(text)
+            self.query_one("#kit-detail", Static).update(meta)
         except:
             pass
     
