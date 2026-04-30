@@ -529,12 +529,63 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
             print(msg, file=sys.stderr)
             if app_ref: app_ref.post_message(StatusMsg(msg))
     
-    final = f"✓ imported {imported}/{total} samples — run 'tag' command for LLM labeling"
+    final = f"✓ imported {imported}/{total} samples — press Ctrl+T to LLM-tag"
     print(final, file=sys.stderr)
     if app_ref: app_ref.post_message(StatusMsg(final))
     return imported
 
 # ─── TUI Widgets & Screens ────────────────────────────────────────────────────
+async def tag_pipeline(db: DB, batch_size: int = 5, app_ref=None):
+    """LLM-tag untagged samples: generate tags, genre, and ai_notes from spectral data."""
+    if not db.conn: db.connect()
+    cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]' OR ai_notes IS NULL OR ai_notes = '' ORDER BY RANDOM()")
+    untagged = [db._parse_row(r) for r in cur.fetchall()]
+    total = len(untagged)
+    if total == 0:
+        msg = "all samples already tagged"
+        if app_ref: app_ref.post_message(StatusMsg(msg))
+        return 0
+    
+    tagged = 0
+    for start in range(0, total, batch_size):
+        batch = untagged[start:start + batch_size]
+        batch_text = ""
+        for s in batch:
+            feats = {
+                "duration_ms": s.get("duration_ms", 0),
+                "bpm": s.get("bpm"),
+                "rms_db": s.get("rms_db"),
+                "spectral_centroid_hz": s.get("spectral_centroid_hz"),
+                "spectral_flatness": s.get("spectral_flatness"),
+                "transient_score": s.get("transient_score"),
+                "onset_confidence": s.get("onset_confidence"),
+            }
+            char = describe_audio(feats)
+            folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
+            batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
+        
+        sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. Analyze each sample's spectral data and filename to generate accurate tags, genre, and a one-line description. Be specific and honest — don't guess."}
+        user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples. For each, return: tags (3-6 keywords), genre, and a one-line sonic description.\n\n{batch_text}\nJSON: {{\"samples\":[{{\"id\":\"...\",\"tags\":[\"kick\",\"808\"],\"genre\":\"techno\",\"notes\":\"Punchy 808 kick with fast decay, good for driving techno\"}},...]}}"}
+        
+        resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000)
+        if not resp:
+            continue
+        try:
+            j = json.loads(resp)
+            for entry in j.get("samples", []):
+                sid = entry.get("id")
+                tags = entry.get("tags", [])
+                genre = entry.get("genre", "")
+                notes = entry.get("notes", "")[:200]
+                if sid:
+                    db.update_tags(sid, tags, genre=genre, notes=notes)
+                    tagged += 1
+        except:
+            pass
+        msg = f"tagged {tagged}/{total}"
+        if app_ref: app_ref.post_message(StatusMsg(msg))
+    return tagged
+
 class StatusMsg(Message):
     def __init__(self, text: str):
         self.text = text
@@ -1033,6 +1084,7 @@ class CruxApp(App):
         Binding("p", "play", "Play"),
         Binding("ctrl+s", "settings", "Settings", priority=True),
         Binding("ctrl+e", "export", "Export kit"),
+        Binding("ctrl+t", "tag", "Tag samples"),
 
         Binding("space", "toggle_lock", "Lock/unlock"),
         Binding("delete", "clear_kit_slot", "Clear slot"),
@@ -1797,6 +1849,25 @@ class CruxApp(App):
                 self._spin_task.cancel()
     
     # ─── Import ──────────────────────────────────────────────────────────────
+    @work(exclusive=True)
+    async def run_tag(self):
+        """Batch-tag all untagged samples via LLM."""
+        self._status_spinner = True
+        self._spin_task = asyncio.create_task(self._status_spin("tagging samples"))
+        try:
+            results = await tag_pipeline(self.db, batch_size=5, app_ref=self)
+            if results:
+                self._stats = await self.db.get_stats()
+                self._update_header()
+                self.search(self._query)
+                self.set_status(f"✓ tagged {results} samples")
+            else:
+                self.set_status("no untagged samples")
+        finally:
+            self._status_spinner = False
+            if hasattr(self, '_spin_task'):
+                self._spin_task.cancel()
+    
     @work
     async def run_import(self, path: str):
         self.set_status(f"importing: {path}…")
@@ -1946,6 +2017,10 @@ class CruxApp(App):
     def action_export(self):
         """Open the export modal."""
         self.push_screen(ExportScreen())
+    
+    def action_tag(self):
+        """Batch-tag all untagged samples via LLM."""
+        self.run_tag()
     
     def action_settings(self):
         """Open the settings modal."""
