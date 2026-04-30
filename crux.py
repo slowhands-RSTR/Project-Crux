@@ -1710,21 +1710,21 @@ class CruxApp(App):
             else:
                 search_query = direction
             
-            relevant = await self.db.search(search_query, 100)
+            # Run FTS5 + spectral candidates in parallel
             kit_ids = set()
             for s in self._kit:
                 if s:
                     kit_ids.add(s["id"])
-            candidates = []
-            for s in relevant:
-                if s["id"] not in kit_ids:
+            
+            # 1) FTS5 text search — finds named/tagged matches
+            relevant = await self.db.search(search_query, 60)
+            candidates = [s for s in relevant if s["id"] not in kit_ids]
+            
+            # 2) Spectral fallback — always add random diverse samples for LLM to pick by audio features
+            random_samples = await self.db.get_some(60)
+            for s in random_samples:
+                if s["id"] not in kit_ids and len(candidates) < 120:
                     candidates.append(s)
-            if len(candidates) < len(target_slots) * 3:
-                # FTS5 returned too few — try broad random, let LLM use spectral features
-                random_samples = await self.db.get_some(80)
-                for s in random_samples:
-                    if s["id"] not in kit_ids and len(candidates) < 100:
-                        candidates.append(s)
             cand_str = ""
             for i, s in enumerate(candidates[:80]):
                 tags = " ".join(s.get("tags") or [])[:60]
