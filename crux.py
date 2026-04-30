@@ -1500,38 +1500,31 @@ class CruxApp(App):
     
     @on(ListView.Highlighted)
     def handle_list_highlight(self, event: ListView.Highlighted) -> None:
-        """Auto-select slot on arrow key navigation, auto-audition."""
+        """Update UI when navigating lists."""
         lv = event.list_view
-        if lv.id == "kit-grid":
-            idx = lv.index
-            if idx is not None and 0 <= idx < KIT_SLOTS:
-                self._kit_index = idx
-                slot_name = SLOT_NAMES[idx] if idx < len(SLOT_NAMES) else f"Slot {idx+1}"
-                s = self._kit[idx]
-                if s:
-                    path = s.get("path", "")
-                    if path and os.path.exists(path):
-                        self._play_audio(path)
-                        self._show_waveform(path, s.get('name','?'), sample=s)
-                        self.set_status(f"▶ {s['name']}  |  slot: {slot_name}")
-                else:
-                    self.set_status(f"slot: {slot_name} (empty)")
-                    # Clear kit detail when slot is empty
-                    try:
-                        self.query_one("#kit-detail", Static).renderable = ""
-                    except:
-                        pass
-        elif lv.id == "sample-list":
-            idx = lv.index
-            if idx is not None and 0 <= idx < len(self._samples):
-                s = self._samples[idx]
-                # Auto-audition + show waveform on arrow navigation
-                path = s.get("path", "")
-                if path and os.path.exists(path):
-                    self._play_audio(path)
-                    self._show_waveform(path, s.get('name','?'), sample=s)
-                target = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
-                self.set_status(f"▶ {s['name']}  ·  Enter → {target}")
+        idx = lv.index
+        if idx is None:
+            return
+        # Force-update both panels with the sample name
+        name = "?"
+        if lv.id == "kit-grid" and 0 <= idx < KIT_SLOTS:
+            self._kit_index = idx
+            s = self._kit[idx]
+            if s:
+                name = s.get("name", "?")
+        elif lv.id == "sample-list" and 0 <= idx < len(self._samples):
+            s = self._samples[idx]
+            name = s.get("name", "?")
+        # Set text in both widgets unconditionally
+        try:
+            self.query_one("#waveform-view", Static).renderable = f"▶ {name}"
+        except:
+            pass
+        try:
+            self.query_one("#kit-detail", Static).renderable = f"▶ {name}"
+        except:
+            pass
+        self.set_status(f"{lv.id}[{idx}]: {name}")
     
     @on(ListView.Selected)
     def handle_list_selected(self, event: ListView.Selected) -> None:
