@@ -683,6 +683,7 @@ class SettingsScreen(Screen):
             Static("", id="s-result"),
             Horizontal(
                 Button("Test", id="s-test"),
+                Button("Tag all", id="s-tag"),
                 Button("Save", id="s-save", variant="primary"),
                 Button("Cancel", id="s-cancel"),
                 id="s-actions",
@@ -758,6 +759,8 @@ class SettingsScreen(Screen):
             self._test()
         elif btn_id == "s-save":
             self._save()
+        elif btn_id == "s-tag":
+            self.dismiss("tag")
         elif btn_id == "s-cancel":
             self.dismiss(None)
     
@@ -1207,7 +1210,7 @@ class CruxApp(App):
                 id="content-area",
             ),
             Container(
-                Static("↑↓/jk=navigate · enter=add · 1-0,^1-^6=slots · delete=clear · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
+                Static("↑↓/jk=navigate · enter=add · 1-0,^1-^6=slots · delete=clear · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+T=tag · Ctrl+S=settings"),
                 id="status-bar",
             ),
             id="main-container",
@@ -2070,8 +2073,11 @@ class CruxApp(App):
     
     def action_settings(self):
         """Open the settings modal."""
-        def _on_settings_done(changed):
-            if changed:
+        def _on_settings_done(result):
+            if result == "tag":
+                self.run_tag()
+                return
+            if result:
                 global _config, LMSTUDIO_URL, LMSTUDIO_MODEL, LLM_API_KEY, DB_PATH, KIT_SLOTS, PAGE_SIZE
                 _config = load_config()
                 _db = _config["general"].get("db_path", "")
