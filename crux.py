@@ -1445,7 +1445,6 @@ class CruxApp(App):
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
         """Show sample info in waveform bar and kit detail panel."""
-        # Build display text
         lines = [(name or "?")[:60]]
         if sample:
             dur = sample.get("duration_ms", 0)
@@ -1461,11 +1460,11 @@ class CruxApp(App):
             lines.append(f"tags: {tag_str}")
         text = "\n".join(lines)
         try:
-            self.query_one("#waveform-view", Static).renderable = text
+            self.query_one("#waveform-view", Static).update(text)
         except:
             pass
         try:
-            self.query_one("#kit-detail", Static).renderable = text
+            self.query_one("#kit-detail", Static).update(text)
         except:
             pass
     
@@ -1507,29 +1506,20 @@ class CruxApp(App):
             return
         name = "?"
         path = ""
+        sample = None
         if lv.id == "kit-grid" and 0 <= idx < KIT_SLOTS:
             self._kit_index = idx
-            s = self._kit[idx]
-            if s:
-                name = s.get("name", "?")
-                path = s.get("path", "")
+            sample = self._kit[idx]
+            if sample:
+                name = sample.get("name", "?")
+                path = sample.get("path", "")
         elif lv.id == "sample-list" and 0 <= idx < len(self._samples):
-            s = self._samples[idx]
-            name = s.get("name", "?")
-            path = s.get("path", "")
+            sample = self._samples[idx]
+            name = sample.get("name", "?")
+            path = sample.get("path", "")
         if path and os.path.exists(path):
             self._play_audio(path)
-        # Update panels — try update() instead of renderable =
-        try:
-            self.query_one("#waveform-view", Static).update(f"▶ {name}")
-        except Exception as e:
-            self.set_status(f"wf err: {e}")
-            return
-        try:
-            self.query_one("#kit-detail", Static).update(f"▶ {name}")
-        except Exception as e:
-            self.set_status(f"kd err: {e}")
-            return
+        self._show_waveform(path, name, sample=sample)
         self.set_status(f"▶ {name}")
     
     @on(ListView.Selected)
