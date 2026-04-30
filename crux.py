@@ -48,7 +48,7 @@ def load_config():
             "api_key": "",
         },
         "import": {"recursive": True, "analyze_bpm": True, "analyze_key": False, "audio_formats": ["wav","mp3","aiff","aif","flac","ogg","m4a"], "tag_batch_size": 3},
-        "ui": {"theme": "default", "samples_per_page": 200, "kit_slots": 8},
+        "ui": {"theme": "default", "samples_per_page": 500, "kit_slots": 8},
     }
     # Parse config.toml manually (Python 3.9 doesn't have tomllib)
     try:
