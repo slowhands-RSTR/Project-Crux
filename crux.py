@@ -937,11 +937,12 @@ class CruxApp(App):
         padding: 0 0 0 1;
     }}
     #kit-grid {{
-        height: 100%;
+        height: auto;
+        max-height: 80%;
         overflow-y: auto;
     }}
     #kit-grid ListView {{
-        height: 100%;
+        height: auto;
         border: none;
         background: transparent;
     }}
@@ -963,7 +964,7 @@ class CruxApp(App):
     }}
     #kit-grid ListItem > Label {{ color: $fg; }}
     #kit-detail {{
-        height: 7;
+        height: 8;
         padding: 0 1;
         color: $dim;
         border-top: solid $border;
