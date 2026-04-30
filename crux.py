@@ -11,7 +11,7 @@ Usage:
   ./crux.py import ~/samples/   # import & analyze + LLM-tag a folder
 """
 
-import sys, os, sqlite3, re, json, subprocess, time, asyncio, uuid
+import sys, os, sqlite3, re, json, subprocess, time, asyncio, uuid, concurrent.futures
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
@@ -346,7 +346,7 @@ def analyze_audio(path: str) -> dict:
         import librosa
         import numpy as np
         
-        y, sr = librosa.load(path, sr=22050, duration=10, mono=True)
+        y, sr = librosa.load(path, sr=22050, duration=5, mono=True)
         if len(y) == 0:
             return features
         
@@ -506,28 +506,28 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
     
     # Process files concurrently — up to 4 librosa analyses at a time
     loop = asyncio.get_running_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        async def _import_one(fpath: str) -> bool:
+            nonlocal imported
+            name = Path(fpath).stem
+            feats = await loop.run_in_executor(pool, analyze_audio, fpath)
+            sid = str(uuid.uuid4())
+            try:
+                db.conn.execute(
+                    "INSERT OR IGNORE INTO samples (id, name, path, duration_ms, bpm, rms_db, spectral_centroid_hz, spectral_flatness, transient_score, onset_confidence) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (sid, name, fpath, feats["duration_ms"], feats["bpm"],
+                     feats["rms_db"], feats["spectral_centroid_hz"],
+                     feats["spectral_flatness"], feats["transient_score"],
+                     feats["onset_confidence"]))
+                db.conn.commit()
+                imported += 1
+                return True
+            except:
+                return False
     
-    async def _import_one(fpath: str) -> bool:
-        nonlocal imported
-        name = Path(fpath).stem
-        feats = await loop.run_in_executor(None, analyze_audio, fpath)
-        sid = str(uuid.uuid4())
-        try:
-            db.conn.execute(
-                "INSERT OR IGNORE INTO samples (id, name, path, duration_ms, bpm, rms_db, spectral_centroid_hz, spectral_flatness, transient_score, onset_confidence) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (sid, name, fpath, feats["duration_ms"], feats["bpm"],
-                 feats["rms_db"], feats["spectral_centroid_hz"],
-                 feats["spectral_flatness"], feats["transient_score"],
-                 feats["onset_confidence"]))
-            db.conn.commit()
-            imported += 1
-            return True
-        except:
-            return False
-    
-    for i in range(0, total, 4):
-        window = files[i:i + 4]
-        await asyncio.gather(*(_import_one(f) for f in window))
+        for i in range(0, total, 4):
+            window = files[i:i + 4]
+            await asyncio.gather(*(_import_one(f) for f in window))
         
         # Report every 5%
         pct = min((i + 4) * 100 // total, 100) if i + 4 < total else 100
