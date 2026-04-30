@@ -1691,9 +1691,11 @@ class CruxApp(App):
             for i in target_slots:
                 if i < len(SLOT_NAMES):
                     slot_context_words.append(SLOT_NAMES[i])
-            search_query = direction
-            if slot_context_words:
+            # Only add slot context when targeting specific slots (<=half), not broad refine
+            if slot_context_words and len(target_slots) <= KIT_SLOTS // 2:
                 search_query = " ".join(slot_context_words) + " " + direction
+            else:
+                search_query = direction
             
             relevant = await self.db.search(search_query, 100)
             kit_ids = set()
