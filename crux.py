@@ -966,6 +966,7 @@ class CruxApp(App):
         height: 8;
         padding: 0 1;
         color: $fg;
+        background: $surface;
         border-top: solid $border;
         overflow: hidden;
     }}
