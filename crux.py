@@ -535,9 +535,11 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
     return imported
 
 # ─── TUI Widgets & Screens ────────────────────────────────────────────────────
-async def tag_pipeline(db: DB, batch_size: int = 5, app_ref=None):
-    """LLM-tag untagged samples: generate tags, genre, and ai_notes from spectral data."""
+async def tag_pipeline(db: DB, batch_size: int = 5, app_ref=None, pause_check=None):
+    """LLM-tag untagged samples: generate tags, genre, and ai_notes from spectral data.
+    Pause between batches if pause_check() returns True."""
     if not db.conn: db.connect()
+    # Re-query each batch so we pick up where paused
     cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]' OR ai_notes IS NULL OR ai_notes = '' ORDER BY RANDOM()")
     untagged = [db._parse_row(r) for r in cur.fetchall()]
     total = len(untagged)
@@ -547,7 +549,21 @@ async def tag_pipeline(db: DB, batch_size: int = 5, app_ref=None):
         return 0
     
     tagged = 0
-    for start in range(0, total, batch_size):
+    start = 0
+    while start < total:
+        # Check pause before each batch
+        if pause_check and pause_check():
+            # Wait until unpaused
+            while pause_check():
+                await asyncio.sleep(0.5)
+            # Re-query to get remaining untagged (resume-friendly)
+            cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]' OR ai_notes IS NULL OR ai_notes = '' ORDER BY RANDOM()")
+            untagged = [db._parse_row(r) for r in cur.fetchall()]
+            total = len(untagged)
+            start = 0
+            if total == 0:
+                break
+        batch = untagged[start:start + batch_size]
         batch = untagged[start:start + batch_size]
         batch_text = ""
         for s in batch:
@@ -584,6 +600,7 @@ async def tag_pipeline(db: DB, batch_size: int = 5, app_ref=None):
             pass
         msg = f"tagged {tagged}/{total}"
         if app_ref: app_ref.post_message(StatusMsg(msg))
+        start += batch_size
     return tagged
 
 class StatusMsg(Message):
@@ -1122,6 +1139,7 @@ class CruxApp(App):
         self._kit_index = 0
         self._current_audio: Optional[subprocess.Popen] = None
         self._last_selected_id: Optional[str] = None
+        self._tag_paused: bool = False
     
     def get_css_variables(self) -> dict[str, str]:
         """Return CSS variables matching the current theme."""
@@ -1851,16 +1869,37 @@ class CruxApp(App):
     # ─── Import ──────────────────────────────────────────────────────────────
     @work(exclusive=True)
     async def run_tag(self):
-        """Batch-tag all untagged samples via LLM."""
+        """Batch-tag all untagged samples via LLM. Pause/resume with Ctrl+T."""
+        self._tag_paused = False
         self._status_spinner = True
-        self._spin_task = asyncio.create_task(self._status_spin("tagging samples"))
+        
+        async def _pausable_spinner(label):
+            chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+            i = 0
+            while getattr(self, '_status_spinner', False):
+                if self._tag_paused:
+                    self.set_status("⏸ tagged paused — Ctrl+T to resume")
+                else:
+                    self.set_status(f"{chars[i % len(chars)]} {label}")
+                i += 1
+                try:
+                    await asyncio.sleep(0.2)
+                except asyncio.CancelledError:
+                    break
+        
+        def _is_paused():
+            return self._tag_paused
+        
+        self._spin_task = asyncio.create_task(_pausable_spinner("tagging samples"))
         try:
-            results = await tag_pipeline(self.db, batch_size=5, app_ref=self)
+            results = await tag_pipeline(self.db, batch_size=5, app_ref=self, pause_check=_is_paused)
             if results:
                 self._stats = await self.db.get_stats()
                 self._update_header()
                 self.search(self._query)
                 self.set_status(f"✓ tagged {results} samples")
+            elif self._tag_paused:
+                self.set_status("tag paused")
             else:
                 self.set_status("no untagged samples")
         finally:
@@ -2019,8 +2058,15 @@ class CruxApp(App):
         self.push_screen(ExportScreen())
     
     def action_tag(self):
-        """Batch-tag all untagged samples via LLM."""
-        self.run_tag()
+        """Toggle pause/resume tagging, or start if not running."""
+        if self._tag_paused:
+            self._tag_paused = False
+            self.set_status("resuming tag...")
+        elif hasattr(self, '_spin_task') and not self._spin_task.done():
+            self._tag_paused = True
+            self.set_status("pausing after current batch...")
+        else:
+            self.run_tag()
     
     def action_settings(self):
         """Open the settings modal."""
