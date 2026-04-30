@@ -192,16 +192,21 @@ class DB:
         return {"total": total, "tagged": tagged}
     def update_tags(self, sid: str, tags: list[str], genre=None, machine=None, notes=None):
         if not self.conn: self.connect()
-        try:
-            self.conn.execute("UPDATE samples SET tags=?, genre=COALESCE(?,genre), machine=COALESCE(?,machine), ai_notes=COALESCE(?,ai_notes) WHERE id=?",
-                             (json.dumps(tags), genre, machine, notes, sid))
-            self.conn.commit()
-        except sqlite3.Error:
-            self.conn = None
-            self.connect()
-            self.conn.execute("UPDATE samples SET tags=?, genre=COALESCE(?,genre), machine=COALESCE(?,machine), ai_notes=COALESCE(?,ai_notes) WHERE id=?",
-                             (json.dumps(tags), genre, machine, notes, sid))
-            self.conn.commit()
+        for attempt in range(2):
+            try:
+                cur = self.conn.execute("UPDATE samples SET tags=?, genre=COALESCE(?,genre), machine=COALESCE(?,machine), ai_notes=COALESCE(?,ai_notes) WHERE id=?",
+                                       (json.dumps(tags), genre, machine, notes, sid))
+                self.conn.commit()
+                if cur.rowcount == 0:
+                    print(f"[db] update_tags: no row matched for sid={sid[:20]}...", file=sys.stderr)
+                return cur.rowcount
+            except sqlite3.Error:
+                if attempt == 0:
+                    self.conn = None
+                    self.connect()
+                else:
+                    print(f"[db] update_tags failed for sid={sid[:20]}...", file=sys.stderr)
+                    return 0
     async def get_some(self, limit: int = 50) -> list[dict]:
         """Quick fetch for random/initial load."""
         if not self.conn: self.connect()
@@ -659,8 +664,8 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                 notes = entry.get("notes") or entry.get("description") or ""
                 notes = notes[:200]
                 if sid:
-                    db.update_tags(sid, tags, genre=genre_str, notes=notes)
-                    count += 1
+                    if db.update_tags(sid, tags, genre=genre_str, notes=notes):
+                        count += 1
             return count
     
     # Process batches concurrently with pause support
