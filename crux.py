@@ -1206,20 +1206,43 @@ class CruxApp(App):
             new_tags = q[5:].strip().split()
             if self._last_selected_id and new_tags:
                 try:
-                    # Update in DB
                     self.db.update_tags(self._last_selected_id, new_tags)
-                    # Update in-memory copies
                     for s in self._samples:
                         if s["id"] == self._last_selected_id:
                             s["tags"] = new_tags
                     for s in self._kit:
                         if s and s["id"] == self._last_selected_id:
                             s["tags"] = new_tags
-                    self.set_status(f"tags updated: {' '.join(new_tags)}")
-                    # Refresh display
+                    self.set_status(f"tags: {' '.join(new_tags)}")
                     self.search(self._query)
                 except Exception as e:
                     self.set_status(f"tag error: {e}")
+            else:
+                self.set_status("select a sample first")
+            return
+        
+        # /notes <text> — edit ai notes on last selected sample
+        if q.startswith("/notes "):
+            note = q[7:].strip()[:200]
+            if self._last_selected_id:
+                try:
+                    # Get existing tags to avoid overwriting with None
+                    existing_tags = []
+                    for s in self._samples:
+                        if s["id"] == self._last_selected_id:
+                            existing_tags = s.get("tags") or []
+                            break
+                    self.db.update_tags(self._last_selected_id, existing_tags, notes=note)
+                    for s in self._samples:
+                        if s["id"] == self._last_selected_id:
+                            s["ai_notes"] = note
+                    for s in self._kit:
+                        if s and s["id"] == self._last_selected_id:
+                            s["ai_notes"] = note
+                    self.set_status(f"notes updated")
+                    self.search(self._query)
+                except Exception as e:
+                    self.set_status(f"notes error: {e}")
             else:
                 self.set_status("select a sample first")
             return
@@ -1482,8 +1505,11 @@ class CruxApp(App):
             lines.append(f"{dur_str}  {bpm}  {machine}")
             lines.append(f"{folder}  {genre}")
             lines.append(f"tags: {tag_str}")
+            notes = (sample.get("ai_notes") or "")[:80]
+            if notes:
+                lines.append(f"notes: {notes}")
             lines.append("---")
-            lines.append('/tag <words> to edit')
+            lines.append('/tag <w> /notes <t> to edit')
         meta = "\n".join(lines)
         try:
             self.query_one("#waveform-view", Static).update(meta)
