@@ -1024,6 +1024,14 @@ class CruxApp(App):
         Binding("6", "slot_6", "Slot 6"),
         Binding("7", "slot_7", "Slot 7"),
         Binding("8", "slot_8", "Slot 8"),
+        Binding("9", "slot_9", "Slot 9"),
+        Binding("0", "slot_10", "Slot 10"),
+        Binding("ctrl+1", "slot_11", "Slot 11"),
+        Binding("ctrl+2", "slot_12", "Slot 12"),
+        Binding("ctrl+3", "slot_13", "Slot 13"),
+        Binding("ctrl+4", "slot_14", "Slot 14"),
+        Binding("ctrl+5", "slot_15", "Slot 15"),
+        Binding("ctrl+6", "slot_16", "Slot 16"),
     ]
     
     def __init__(self, import_path=None):
@@ -1105,7 +1113,7 @@ class CruxApp(App):
                 id="content-area",
             ),
             Container(
-                Static("↑↓/jk=navigate · enter=add · 1-8=slot · delete=clear · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
+                Static("↑↓/jk=navigate · enter=add · 1-0,^1-^6=slots · delete=clear · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
                 id="status-bar",
             ),
             id="main-container",
@@ -1808,6 +1816,14 @@ class CruxApp(App):
     def action_slot_6(self): self._add_highlighted_to_slot(5)
     def action_slot_7(self): self._add_highlighted_to_slot(6)
     def action_slot_8(self): self._add_highlighted_to_slot(7)
+    def action_slot_9(self): self._add_highlighted_to_slot(8)
+    def action_slot_10(self): self._add_highlighted_to_slot(9)
+    def action_slot_11(self): self._add_highlighted_to_slot(10)
+    def action_slot_12(self): self._add_highlighted_to_slot(11)
+    def action_slot_13(self): self._add_highlighted_to_slot(12)
+    def action_slot_14(self): self._add_highlighted_to_slot(13)
+    def action_slot_15(self): self._add_highlighted_to_slot(14)
+    def action_slot_16(self): self._add_highlighted_to_slot(15)
     
     def action_export(self):
         """Open the export modal."""
