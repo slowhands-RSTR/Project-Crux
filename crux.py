@@ -1269,7 +1269,7 @@ class CruxApp(App):
             lv.append(ListItem(Label(f"[{t['fg']}]{name}[/]{folder_tag}{machine}{genre}{bpm}{dur}{tag_str}")))
         self._update_search_status()
     
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
         q = event.value.strip()
         event.input.clear()
         if not q:
@@ -1308,12 +1308,65 @@ class CruxApp(App):
                 self.set_status("select a sample first")
             return
         
+        # /autotag — LLM-tag the selected sample from spectral data
+        if q.strip() == "/autotag":
+            if self._last_selected_id:
+                self.set_status("tagging sample...")
+                sample = None
+                for s in self._samples:
+                    if s["id"] == self._last_selected_id:
+                        sample = s
+                        break
+                if not sample:
+                    for s in self._kit:
+                        if s and s["id"] == self._last_selected_id:
+                            sample = s
+                            break
+                if sample:
+                    feats = {
+                        "duration_ms": sample.get("duration_ms", 0),
+                        "bpm": sample.get("bpm"),
+                        "rms_db": sample.get("rms_db"),
+                        "spectral_centroid_hz": sample.get("spectral_centroid_hz"),
+                        "spectral_flatness": sample.get("spectral_flatness"),
+                        "transient_score": sample.get("transient_score"),
+                        "onset_confidence": sample.get("onset_confidence"),
+                    }
+                    char = describe_audio(feats)
+                    folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else ""
+                    prompt = f"Sample: {sample['name']} | {folder} | {sample.get('machine') or ''} | {char}\nReturn JSON: {{\"tags\":[...],\"genre\":\"...\",\"notes\":\"...\"}}"
+                    sys_msg = {"role": "system", "content": "You are crüx. Generate accurate tags, genre, and one-line description from spectral data."}
+                    user_msg = {"role": "user", "content": prompt}
+                    resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=500)
+                    if resp:
+                        try:
+                            j = json.loads(resp)
+                            tags = j.get("tags", [])
+                            genre = j.get("genre", "")
+                            notes = j.get("notes", "")[:200]
+                            self.db.update_tags(self._last_selected_id, tags, genre=genre, notes=notes)
+                            for s in self._samples:
+                                if s["id"] == self._last_selected_id:
+                                    s["tags"] = tags
+                                    s["genre"] = genre
+                                    s["ai_notes"] = notes
+                            self.set_status(f"tagged: {sample['name']}")
+                            self.search(self._query)
+                        except:
+                            self.set_status("tag: bad LLM response")
+                    else:
+                        self.set_status("LLM offline")
+                else:
+                    self.set_status("sample not found")
+            else:
+                self.set_status("select a sample first")
+            return
+        
         # /notes <text> — edit ai notes on last selected sample
         if q.startswith("/notes "):
             note = q[7:].strip()[:200]
             if self._last_selected_id:
                 try:
-                    # Get existing tags to avoid overwriting with None
                     existing_tags = []
                     for s in self._samples:
                         if s["id"] == self._last_selected_id:
@@ -1596,7 +1649,7 @@ class CruxApp(App):
             if notes:
                 lines.append(f"notes: {notes}")
             lines.append("---")
-            lines.append('/tag <w> /notes <t> to edit')
+            lines.append('/tag <w> /autotag /notes <t> to edit')
         meta = "\n".join(lines)
         try:
             self.query_one("#waveform-view", Static).update(meta)
