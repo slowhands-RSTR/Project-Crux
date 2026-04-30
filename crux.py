@@ -648,23 +648,50 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                     if sid not in (b["id"] for b in batch):
                         sid = batch[idx]["id"]
                 
-                # Accept various field names the LLM might use
-                tags = entry.get("tags") or entry.get("category") or entry.get("type") or entry.get("instrument") or []
+                # Find tags: first list field (any key), or named fields
+                tags = entry.get("tags")
+                if not tags:
+                    for key in ("category", "type", "instrument", "class", "labels", "keywords"):
+                        val = entry.get(key)
+                        if isinstance(val, list):
+                            tags = val
+                            break
+                if not tags:
+                    # Fallback: any field that's a list of strings
+                    for key, val in entry.items():
+                        if isinstance(val, list) and val and isinstance(val[0], str):
+                            tags = val
+                            break
+                if not tags:
+                    tags = []
                 if isinstance(tags, str):
                     tags = [tags]
+                
                 sonics = entry.get("sonics", [])
                 if sonics:
                     for s_tag in sonics:
                         if s_tag not in tags:
                             tags.append(s_tag)
                 
-                genres_raw = entry.get("genres") or entry.get("genre") or entry.get("style", "")
+                # Find genres: list or string field
+                genres_raw = entry.get("genres") or entry.get("genre")
+                if not genres_raw:
+                    for key in ("style", "styles", "mood"):
+                        genres_raw = entry.get(key)
+                        if genres_raw:
+                            break
                 if isinstance(genres_raw, list):
                     genre_str = ", ".join(g for g in genres_raw if g)
                 else:
                     genre_str = str(genres_raw) if genres_raw else ""
                 
+                # Find notes: any string field that isn't id/tags/genres
                 notes = entry.get("notes") or entry.get("description") or ""
+                if not notes:
+                    for key, val in entry.items():
+                        if key not in ("id", "tags", "genres", "sonics", "genre") and isinstance(val, str) and len(val) > 10:
+                            notes = val
+                            break
                 notes = notes[:200]
                 if sid:
                     if db.update_tags(sid, tags, genre=genre_str, notes=notes):
@@ -1437,16 +1464,42 @@ class CruxApp(App):
                     if resp:
                         try:
                             j = json.loads(resp)
-                            tags = j.get("tags") or j.get("category") or j.get("type") or []
+                            # Find tags: any list field
+                            tags = j.get("tags")
+                            if not tags:
+                                for key in ("category", "type", "instrument", "class", "labels", "keywords"):
+                                    val = j.get(key)
+                                    if isinstance(val, list):
+                                        tags = val
+                                        break
+                            if not tags:
+                                for key, val in j.items():
+                                    if isinstance(val, list) and val and isinstance(val[0], str):
+                                        tags = val
+                                        break
+                            if not tags:
+                                tags = []
                             if isinstance(tags, str):
                                 tags = [tags]
                             sonics = j.get("sonics", [])
                             for s_t in sonics:
                                 if s_t not in tags:
                                     tags.append(s_t)
-                            genres_raw = j.get("genres") or j.get("genre") or j.get("style", "")
+                            # Find genres: list or string
+                            genres_raw = j.get("genres") or j.get("genre")
+                            if not genres_raw:
+                                for key in ("style", "styles", "mood"):
+                                    genres_raw = j.get(key)
+                                    if genres_raw:
+                                        break
                             genre_str = ", ".join(g for g in genres_raw if g) if isinstance(genres_raw, list) else str(genres_raw) if genres_raw else ""
+                            # Find notes: any string field
                             notes = j.get("notes") or j.get("description") or ""
+                            if not notes:
+                                for key, val in j.items():
+                                    if key not in ("id", "tags", "genres", "sonics", "genre") and isinstance(val, str) and len(val) > 10:
+                                        notes = val
+                                        break
                             notes = notes[:200]
                             self.db.update_tags(self._last_selected_id, tags, genre=genre_str, notes=notes)
                             for s in self._samples:
