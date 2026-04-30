@@ -211,7 +211,7 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
     model = override_model or LMSTUDIO_MODEL
     api_key = override_key or LLM_API_KEY
     try:
-        timeout = aiohttp.ClientTimeout(total=120)
+        timeout = aiohttp.ClientTimeout(total=30)
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
