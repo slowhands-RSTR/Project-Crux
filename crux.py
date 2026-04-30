@@ -535,10 +535,12 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
     return imported
 
 # ─── TUI Widgets & Screens ────────────────────────────────────────────────────
-async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=None):
+async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=None, progress=None):
     """LLM-tag untagged samples: generate tags, genre, and ai_notes from spectral data.
     Uses 4 concurrent workers — one per LM Studio slot — for parallel tagging.
-    Pauses between batches if pause_check() returns True."""
+    Pauses between batches if pause_check() returns True.
+    progress: optional mutable list [tagged_so_far, total] for live spinner updates.
+    """
     if not db.conn: db.connect()
     cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]' OR ai_notes IS NULL OR ai_notes = '' ORDER BY RANDOM()")
     untagged = [db._parse_row(r) for r in cur.fetchall()]
@@ -547,6 +549,9 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
         msg = "all samples already tagged"
         if app_ref: app_ref.post_message(StatusMsg(msg))
         return 0
+    
+    if progress is not None:
+        progress[1] = total
     
     # Chunk into batches
     batches = [untagged[i:i + batch_size] for i in range(0, total, batch_size)]
@@ -560,7 +565,6 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
     
     async def _tag_batch(batch: list[dict]) -> int:
         nonlocal tagged
-        # Check pause before starting
         if pause_check and pause_check():
             return 0
         
@@ -614,7 +618,6 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
     # Process batches concurrently with pause support
     batch_idx = 0
     while batch_idx < len(batches):
-        # On pause, requery for remaining and restart fresh
         if pause_check and pause_check():
             while pause_check():
                 await asyncio.sleep(0.5)
@@ -626,11 +629,12 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                 break
             continue
         
-        # Fire next window of concurrent batches
         window = batches[batch_idx:batch_idx + concurrency]
         results = await asyncio.gather(*(_tag_batch(b) for b in window))
         batch_tagged = sum(results)
         tagged += batch_tagged
+        if progress is not None:
+            progress[0] = tagged
         batch_idx += concurrency
         
         msg = f"tagged {tagged}/{total}"
@@ -1965,14 +1969,23 @@ class CruxApp(App):
         self._tag_paused = False
         self._status_spinner = True
         
-        async def _pausable_spinner(label):
+        # Shared progress: [tagged_so_far, total_untagged]
+        progress = [0, 0]
+        
+        async def _pausable_spinner():
             chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
             i = 0
             while getattr(self, '_status_spinner', False):
                 if self._tag_paused:
-                    self.set_status("⏸ tagged paused — Ctrl+T to resume")
+                    self.set_status("⏸ paused — Ctrl+T to resume")
                 else:
-                    self.set_status(f"{chars[i % len(chars)]} {label}")
+                    t = progress[0]
+                    total = progress[1]
+                    if total > 0:
+                        pct = min(t * 100 // total, 100)
+                        self.set_status(f"{chars[i % len(chars)]} tagging  ({t}/{total}) {pct}%")
+                    else:
+                        self.set_status(f"{chars[i % len(chars)]} tagging")
                 i += 1
                 try:
                     await asyncio.sleep(0.2)
@@ -1982,10 +1995,10 @@ class CruxApp(App):
         def _is_paused():
             return self._tag_paused
         
-        self._spin_task = asyncio.create_task(_pausable_spinner("tagging samples"))
+        self._spin_task = asyncio.create_task(_pausable_spinner())
         try:
             cfg_batch = _config.get("import", {}).get("tag_batch_size", 12)
-            results = await tag_pipeline(self.db, batch_size=cfg_batch, app_ref=self, pause_check=_is_paused)
+            results = await tag_pipeline(self.db, batch_size=cfg_batch, app_ref=self, pause_check=_is_paused, progress=progress)
             if results:
                 self._stats = await self.db.get_stats()
                 self._update_header()
@@ -1994,7 +2007,7 @@ class CruxApp(App):
             elif self._tag_paused:
                 self.set_status("tag paused")
             else:
-                self.set_status("no untagged samples")
+                self.set_status("no untapped samples")
         finally:
             self._status_spinner = False
             if hasattr(self, '_spin_task'):
