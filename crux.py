@@ -1519,11 +1519,17 @@ class CruxApp(App):
             path = s.get("path", "")
         if path and os.path.exists(path):
             self._play_audio(path)
-        # Update panels
-        wf = self.query_one("#waveform-view", Static)
-        wf.renderable = f"▶ {name}"
-        kd = self.query_one("#kit-detail", Static)
-        kd.renderable = f"▶ {name}"
+        # Update panels — try update() instead of renderable =
+        try:
+            self.query_one("#waveform-view", Static).update(f"▶ {name}")
+        except Exception as e:
+            self.set_status(f"wf err: {e}")
+            return
+        try:
+            self.query_one("#kit-detail", Static).update(f"▶ {name}")
+        except Exception as e:
+            self.set_status(f"kd err: {e}")
+            return
         self.set_status(f"▶ {name}")
     
     @on(ListView.Selected)
