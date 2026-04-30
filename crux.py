@@ -1676,11 +1676,24 @@ class CruxApp(App):
         if search_words:
             search_query = " ".join(search_words)
         else:
-            # No meaningful direction — describe what we're targeting
             slot_names = [SLOT_NAMES[i] if i < len(SLOT_NAMES) else f"slot{i+1}" for i in target]
             search_query = " ".join(slot_names)
         
-        self.run_kit_refine(search_query, target)
+        # Translate vague directions into searchable terms
+        dir_map = {
+            "darker": "dark deep bass sub low heavy",
+            "brighter": "bright hi hat cymbal high shimmer",
+            "heavier": "heavy hard punch loud thick",
+            "softer": "soft gentle light quiet warm",
+            "warmer": "warm analog tape saturated rich",
+            "punchier": "punchy attack transient snap sharp",
+            "cleaner": "clean clear crisp digital precise",
+            "looser": "loose sloppy groove swing organic",
+            "tighter": "tight compressed controlled punch snappy",
+        }
+        translated = " ".join(dir_map.get(w, w) for w in search_words)
+        
+        self.run_kit_refine(translated, target)
     
     @work(exclusive=True)
     async def run_kit_refine(self, direction: str, target_slots: list[int]):
