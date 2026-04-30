@@ -606,46 +606,52 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                 return 0
             
             count = 0
+            entries = []
             try:
                 j = json.loads(resp)
                 entries = j.get("samples")
                 if entries is None:
                     entries = [j]
-                for idx, entry in enumerate(entries):
-                    sid = entry.get("id", "")
-                    if not sid and idx < len(batch):
+            except json.JSONDecodeError:
+                pass
+            
+            # If full JSON parse failed, try to salvage individual sample objects
+            if not entries:
+                for sample_json in re.finditer(r'\{"id":\s*"[^"]+"[^}]+\}', resp, re.DOTALL):
+                    try:
+                        entry = json.loads(sample_json.group())
+                        if entry.get("id"):
+                            entries.append(entry)
+                    except json.JSONDecodeError:
+                        continue
+            
+            for idx, entry in enumerate(entries):
+                sid = entry.get("id", "")
+                if not sid and idx < len(batch):
+                    sid = batch[idx]["id"]
+                elif sid and idx < len(batch):
+                    if sid not in (b["id"] for b in batch):
                         sid = batch[idx]["id"]
-                    elif sid and idx < len(batch):
-                        # Verify the returned ID makes sense; fall back to position
-                        if sid not in (b["id"] for b in batch):
-                            sid = batch[idx]["id"]
-                    
-                    tags = entry.get("tags", [])
-                    # Merge sonics into tags for searchability
-                    sonics = entry.get("sonics", [])
-                    if sonics:
-                        for s in sonics:
-                            if s not in tags:
-                                tags.append(s)
-                    
-                    # Handle genres: array or legacy string
-                    genres_raw = entry.get("genres") or entry.get("genre", "")
-                    if isinstance(genres_raw, list):
-                        genre_str = ", ".join(g for g in genres_raw if g)
-                    else:
-                        genre_str = str(genres_raw) if genres_raw else ""
-                    
-                    notes = entry.get("notes") or entry.get("description") or ""
-                    notes = notes[:200]
-                    if sid:
-                        async with db_lock:
-                            db.update_tags(sid, tags, genre=genre_str, notes=notes)
-                        count += 1
-            except Exception as e:
-                if app_ref:
-                    app_ref.set_status(f"tag parse error: {e}")
-                import traceback
-                traceback.print_exc()
+                
+                tags = entry.get("tags", [])
+                sonics = entry.get("sonics", [])
+                if sonics:
+                    for s_tag in sonics:
+                        if s_tag not in tags:
+                            tags.append(s_tag)
+                
+                genres_raw = entry.get("genres") or entry.get("genre", "")
+                if isinstance(genres_raw, list):
+                    genre_str = ", ".join(g for g in genres_raw if g)
+                else:
+                    genre_str = str(genres_raw) if genres_raw else ""
+                
+                notes = entry.get("notes") or entry.get("description") or ""
+                notes = notes[:200]
+                if sid:
+                    async with db_lock:
+                        db.update_tags(sid, tags, genre=genre_str, notes=notes)
+                    count += 1
             return count
     
     # Process batches concurrently with pause support
