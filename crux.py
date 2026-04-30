@@ -1524,6 +1524,7 @@ class CruxApp(App):
         wf.renderable = f"▶ {name}"
         kd = self.query_one("#kit-detail", Static)
         kd.renderable = f"▶ {name}"
+        self.set_status(f"▶ {name}")
     
     @on(ListView.Selected)
     def handle_list_selected(self, event: ListView.Selected) -> None:
