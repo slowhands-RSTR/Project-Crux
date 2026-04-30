@@ -937,12 +937,11 @@ class CruxApp(App):
         padding: 0 0 0 1;
     }}
     #kit-grid {{
-        height: auto;
-        max-height: 80%;
+        height: 18;
         overflow-y: auto;
     }}
     #kit-grid ListView {{
-        height: auto;
+        height: 100%;
         border: none;
         background: transparent;
     }}
@@ -1442,34 +1441,30 @@ class CruxApp(App):
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
         """Render an ASCII waveform for the given audio file."""
-        wf = self.query_one("#waveform-view", Static)
         try:
             cols = os.get_terminal_size().columns
             width = min(cols // 2 - 4, 60)
         except:
             width = 50
         waveform = render_waveform_ascii(path, width=width, height=3) or ""
-        wf.renderable = waveform
-        # Update kit detail panel
         try:
-            detail = self.query_one("#kit-detail", Static)
-            if sample:
-                dur = sample.get("duration_ms", 0)
-                dur_str = f"{dur//1000}s" if dur else "—"
-                bpm = f"{int(sample['bpm'])}bpm" if sample.get("bpm") else "—"
-                machine = sample.get("machine") or "—"
-                folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else ""
-                tags = (sample.get("tags") or [])
-                tag_str = " ".join(tags[:6]) if tags else "—"
-                genre = sample.get("genre") or ""
-                detail.renderable = (
-                    f"{name}\n"
-                    f"{dur_str}  {bpm}  {machine}\n"
-                    f"{folder}  {genre}\n"
-                    f"tags: {tag_str}"
-                )
-            else:
-                detail.renderable = name
+            self.query_one("#waveform-view", Static).renderable = waveform
+        except:
+            pass
+        # Build detail text from sample data
+        detail_text = name
+        if sample:
+            dur = sample.get("duration_ms", 0)
+            dur_str = f"{dur//1000}s" if dur else "—"
+            bpm = f"{int(sample['bpm'])}bpm" if sample.get("bpm") else "—"
+            machine = sample.get("machine") or "—"
+            folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else ""
+            tags = (sample.get("tags") or [])
+            tag_str = " ".join(tags[:6]) if tags else "—"
+            genre = sample.get("genre") or ""
+            detail_text = f"{name}\n{dur_str}  {bpm}  {machine}\n{folder}  {genre}\ntags: {tag_str}"
+        try:
+            self.query_one("#kit-detail", Static).renderable = detail_text
         except:
             pass
     
