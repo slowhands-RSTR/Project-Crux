@@ -1681,15 +1681,15 @@ class CruxApp(App):
         
         # Translate vague directions into searchable terms
         dir_map = {
-            "darker": "dark deep bass sub low heavy",
-            "brighter": "bright hi hat cymbal high shimmer",
-            "heavier": "heavy hard punch loud thick",
-            "softer": "soft gentle light quiet warm",
-            "warmer": "warm analog tape saturated rich",
-            "punchier": "punchy attack transient snap sharp",
-            "cleaner": "clean clear crisp digital precise",
+            "darker": "dark deep bass sub low heavy low_centroid",
+            "brighter": "bright hi hat cymbal high shimmer high_centroid",
+            "heavier": "heavy hard punch loud thick high_rms",
+            "softer": "soft gentle light quiet warm low_rms",
+            "warmer": "warm analog tape saturated rich mid_centroid",
+            "punchier": "punchy attack transient snap sharp high_transient",
+            "cleaner": "clean clear crisp digital precise low_flatness",
             "looser": "loose sloppy groove swing organic",
-            "tighter": "tight compressed controlled punch snappy",
+            "tighter": "tight compressed controlled punch snappy high_onset",
         }
         translated = " ".join(dir_map.get(w, w) for w in search_words)
         
@@ -1719,9 +1719,10 @@ class CruxApp(App):
             for s in relevant:
                 if s["id"] not in kit_ids:
                     candidates.append(s)
-            if len(candidates) < len(target_slots) * 5:
-                broader = await self.db.search(direction, 100)
-                for s in broader:
+            if len(candidates) < len(target_slots) * 3:
+                # FTS5 returned too few — try broad random, let LLM use spectral features
+                random_samples = await self.db.get_some(80)
+                for s in random_samples:
                     if s["id"] not in kit_ids and len(candidates) < 100:
                         candidates.append(s)
             cand_str = ""
