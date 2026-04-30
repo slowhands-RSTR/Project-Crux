@@ -1287,7 +1287,7 @@ class CruxApp(App):
         
         # 3) For each drum slot type, search specifically for that type + query
         slot_aliases = {
-            "Hat": ["Hat", "Hihat", "Hi-hat", "Cymbal", "OH", "CH", "Open Hat", "Closed Hat"],
+            "Hat": ["Hat", "Hihat", "Hi-hat", "hh", "OH", "CH", "Cymbal"],
             "Ride": ["Ride", "Cymbal"],
             "Crash": ["Crash", "Cymbal"],
             "Perc": ["Perc", "Percussion", "Shaker", "Tambourine", "Click", "Rim"],
@@ -1295,7 +1295,7 @@ class CruxApp(App):
         for slot_name in list(SLOT_NAMES[:8]):
             try:
                 terms = slot_aliases.get(slot_name, [slot_name])
-                for term in terms[:2]:  # max 2 search terms per slot
+                for term in terms[:4]:  # search up to 4 aliases per slot
                     slot_q = f"{term} {search_query}"
                     slot_results = await self.db.search(slot_q, 20)
                     for s in slot_results:
@@ -1478,13 +1478,13 @@ class CruxApp(App):
             idx = lv.index
             if idx is not None and 0 <= idx < KIT_SLOTS:
                 self._kit_index = idx
-                # Don't call render_kit() here — ListView's own highlight handles visual
                 slot_name = SLOT_NAMES[idx] if idx < len(SLOT_NAMES) else f"Slot {idx+1}"
                 s = self._kit[idx]
                 if s:
                     path = s.get("path", "")
                     if path and os.path.exists(path):
                         self._play_audio(path)
+                        self._show_waveform(path, s.get('name','?'))
                         self.set_status(f"▶ {s['name']}  |  slot: {slot_name}")
                 else:
                     self.set_status(f"slot: {slot_name} (empty)")
@@ -1492,12 +1492,13 @@ class CruxApp(App):
             idx = lv.index
             if idx is not None and 0 <= idx < len(self._samples):
                 s = self._samples[idx]
-                # Show waveform on arrow navigation — audition on Enter only
+                # Auto-audition + show waveform on arrow navigation
                 path = s.get("path", "")
                 if path and os.path.exists(path):
+                    self._play_audio(path)
                     self._show_waveform(path, s.get('name','?'))
                 target = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
-                self.set_status(f"{s['name']}  ·  Enter → {target}")
+                self.set_status(f"▶ {s['name']}  ·  Enter → {target}")
     
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Enter key — set target slot from kit-grid, or add sample from browse."""
