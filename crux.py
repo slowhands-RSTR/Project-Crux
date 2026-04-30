@@ -1189,6 +1189,9 @@ class CruxApp(App):
             idx = lv.index
             if idx is not None and 0 <= idx < len(self._samples):
                 s = self._samples[idx]
+                if self._kit_locked[self._kit_index]:
+                    self.set_status("slot is locked — unlock with space first")
+                    return
                 self._kit[self._kit_index] = s
                 self._advance_kit_slot()
                 self.render_kit()
@@ -1546,6 +1549,9 @@ class CruxApp(App):
             if idx is not None and 0 <= idx < len(self._samples):
                 s = self._samples[idx]
                 slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
+                if self._kit_locked[self._kit_index]:
+                    self.set_status(f"{slot_name} is locked — unlock with space first")
+                    return
                 self._kit[self._kit_index] = s
                 self._advance_kit_slot()
                 self.render_kit()
@@ -1793,6 +1799,11 @@ class CruxApp(App):
         idx = lv.index
         if idx is not None and 0 <= idx < len(self._samples):
             s = self._samples[idx]
+            if self._kit_locked[self._kit_index]:
+                slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
+                self.set_status(f"{slot_name} is locked — unlock with space first")
+                lv.focus()
+                return
             self._kit[self._kit_index] = s
             self._advance_kit_slot()
             self.render_kit()
@@ -1834,6 +1845,10 @@ class CruxApp(App):
         idx = lv.index
         if idx is not None and 0 <= idx < len(self._samples):
             s = self._samples[idx]
+            if self._kit_locked[slot_idx]:
+                slot_name = SLOT_NAMES[slot_idx] if slot_idx < len(SLOT_NAMES) else f"Slot {slot_idx+1}"
+                self.set_status(f"{slot_name} is locked — unlock with space first")
+                return
             self._kit_index = slot_idx
             self._kit[slot_idx] = s
             self.render_kit()
