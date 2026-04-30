@@ -1022,8 +1022,8 @@ class CruxApp(App):
 
         Binding("space", "toggle_lock", "Lock/unlock"),
         Binding("delete", "clear_kit_slot", "Clear slot"),
-        Binding("j", "cursor_down", "↓"),
-        Binding("k", "cursor_up", "↑"),
+        Binding("j", "cursor_down", "↓", priority=True),
+        Binding("k", "cursor_up", "↑", priority=True),
         Binding("1", "slot_1", "Slot 1"),
         Binding("2", "slot_2", "Slot 2"),
         Binding("3", "slot_3", "Slot 3"),
@@ -1816,16 +1816,30 @@ class CruxApp(App):
         self.set_status(f"{slot_name} cleared")
     
     def action_cursor_up(self):
-        """Move cursor up in focused list (Vim k style)."""
-        lv = self.focused
-        if lv and hasattr(lv, "action_cursor_up"):
-            lv.action_cursor_up()
+        """Move cursor up (Vim k / arrows). Only in lists, not in search input."""
+        if self.focused and self.focused.id == "prompt-input":
+            return  # Let the input handle j/k as text
+        for lid in ("sample-list", "kit-grid"):
+            try:
+                lv = self.query_one(f"#{lid}", ListView)
+                if lv.index is not None and lv.index > 0:
+                    lv.index -= 1
+                    return
+            except:
+                pass
     
     def action_cursor_down(self):
-        """Move cursor down in focused list (Vim j style)."""
-        lv = self.focused
-        if lv and hasattr(lv, "action_cursor_down"):
-            lv.action_cursor_down()
+        """Move cursor down (Vim j / arrows). Only in lists, not in search input."""
+        if self.focused and self.focused.id == "prompt-input":
+            return  # Let the input handle j/k as text
+        for lid in ("sample-list", "kit-grid"):
+            try:
+                lv = self.query_one(f"#{lid}", ListView)
+                if lv.index is not None and lv.index < len(lv) - 1:
+                    lv.index += 1
+                    return
+            except:
+                pass
     
     def _add_highlighted_to_slot(self, slot_idx: int):
         """Add the highlighted sample from browse list directly to a specific kit slot."""
