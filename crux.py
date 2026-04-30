@@ -1490,6 +1490,7 @@ class CruxApp(App):
     def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
         """Auto-select slot on arrow key navigation, auto-audition (kit grid only)."""
         lv = event.list_view
+        self.set_status(f"highlight: {lv.id}")
         if lv.id == "kit-grid":
             idx = lv.index
             if idx is not None and 0 <= idx < KIT_SLOTS:
