@@ -564,7 +564,7 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
     # Chunk into batches
     batches = [untagged[i:i + batch_size] for i in range(0, total, batch_size)]
     
-    sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. Rules:\n1. Tags describe WHAT the sample IS (instrument, source, character) — e.g. kick, 808, snare, clap, dark, punchy, lofi, bright, dirty\n2. Genres describe WHERE it fits — a sample can suit MULTIPLE genres (house AND techno share 909s, a dark kick works for both)\n3. Sonic qualifiers (dark, bright, lofi, clean, distorted, warm, airy, punchy, tight, boomy, gritty) go into the tags AND sonics arrays\n4. Use spectral data (centroid=brightness, flatness=noise/tonal, rms=loudness) to determine sonic character\n5. Always respond with ONLY valid JSON — no explanations, no markdown."}
+    sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. RULES:\n- 'tags': instrument type + sonic character (kick, 808, snare, clap, hat, dark, punchy, lofi, bright, warm, dirty, clean, boomy, tight, gritty, airy)\n- 'genres': REQUIRED for EVERY sample. Minimum 1 genre. If uncertain, default to ['techno']. Common: techno, house, drum-and-bass, hip-hop, trap, ambient, dub, breakbeat, garage, idm, bass, downtempo, electro\n- 'sonics': tonal character words derived from spectral data (bright=high centroid, dark=low centroid, noisy=high flatness, pure=low flatness, loud=high rms, quiet=low rms)\n- Use filename as primary instrument indicator\n- Return EXACTLY {len(batch)} entries — one per sample\n- Return ONLY valid JSON. No markdown, no explanation."}
     
     tagged = 0
     concurrency = 4
@@ -592,9 +592,15 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                 folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
                 batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
             
-            user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples. Return ONLY this exact JSON structure — genres is an ARRAY (1+ genres), sonics captures tonal character:\n{{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\", \"dark\", \"punchy\"], \"genres\": [\"techno\", \"house\"], \"sonics\": [\"dark\", \"punchy\", \"warm\"], \"notes\": \"Punchy 808 kick with dark sub-bass\"}}]}}\n\nSamples to tag:\n{batch_text}"}
+            user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples. Return EXACTLY {len(batch)} entries in the samples array, one per sample above. EVERY sample needs genres (min 1).\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"techno\", \"house\"], \"sonics\": [\"dark\", \"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
             
-            resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000)
+            # Retry once on failure
+            resp = None
+            for attempt in range(2):
+                resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000)
+                if resp:
+                    break
+                await asyncio.sleep(1)
             if not resp:
                 return 0
             
