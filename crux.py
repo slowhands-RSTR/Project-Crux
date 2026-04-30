@@ -624,20 +624,37 @@ class SettingsScreen(Screen):
     
     def on_mount(self):
         self._highlight_provider()
-        # Apply theme colors via inline styles
         t = self._theme
         try:
             self.screen.styles.background = t["bg"]
+            # Inputs
             for wid in ["s-url", "s-model", "s-key", "s-lib"]:
                 w = self.query_one(f"#{wid}", Input)
                 w.styles.background = t["surface"]
                 w.styles.color = t["fg"]
                 w.styles.border = ("solid", t["border"])
+            # Select
             try:
                 sel = self.query_one("#s-theme", Select)
                 sel.styles.background = t["surface"]
                 sel.styles.color = t["fg"]
                 sel.styles.border = ("solid", t["border"])
+            except:
+                pass
+            # Buttons
+            for btn_id in ["p-lm_studio", "p-ollama", "p-openai", "p-custom", "s-test", "s-cancel"]:
+                try:
+                    b = self.query_one(f"#{btn_id}", Button)
+                    b.styles.background = t["surface2"]
+                    b.styles.color = t["fg"]
+                    b.styles.border = ("solid", t["border"])
+                except:
+                    pass
+            # Primary button (Save)
+            try:
+                b = self.query_one("#s-save", Button)
+                b.styles.background = t["accent"]
+                b.styles.color = t["bg"]
             except:
                 pass
         except:
