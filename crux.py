@@ -604,7 +604,7 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                 folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
                 batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
             
-            user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples. Return EXACTLY {len(batch)} entries in the samples array, one per sample above. EVERY sample needs genres (min 1).\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"techno\", \"house\"], \"sonics\": [\"dark\", \"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
+            user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- Field names MUST be: id, tags, genres, sonics, notes\n- Do NOT use: category, type, style, description, instrument\n- 'id' must be EXACTLY the ID from each line below — copy it verbatim\n- 'genres' REQUIRED (min 1). If unsure: [\"house\"]\n- Return EXACTLY {len(batch)} entries\n- Return ONLY JSON. No markdown.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"house\"], \"sonics\": [\"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
             
             resp = None
             for attempt in range(2):
@@ -648,14 +648,17 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                     if sid not in (b["id"] for b in batch):
                         sid = batch[idx]["id"]
                 
-                tags = entry.get("tags", [])
+                # Accept various field names the LLM might use
+                tags = entry.get("tags") or entry.get("category") or entry.get("type") or entry.get("instrument") or []
+                if isinstance(tags, str):
+                    tags = [tags]
                 sonics = entry.get("sonics", [])
                 if sonics:
                     for s_tag in sonics:
                         if s_tag not in tags:
                             tags.append(s_tag)
                 
-                genres_raw = entry.get("genres") or entry.get("genre", "")
+                genres_raw = entry.get("genres") or entry.get("genre") or entry.get("style", "")
                 if isinstance(genres_raw, list):
                     genre_str = ", ".join(g for g in genres_raw if g)
                 else:
@@ -1434,14 +1437,17 @@ class CruxApp(App):
                     if resp:
                         try:
                             j = json.loads(resp)
-                            tags = j.get("tags", [])
+                            tags = j.get("tags") or j.get("category") or j.get("type") or []
+                            if isinstance(tags, str):
+                                tags = [tags]
                             sonics = j.get("sonics", [])
                             for s_t in sonics:
                                 if s_t not in tags:
                                     tags.append(s_t)
-                            genres_raw = j.get("genres") or j.get("genre", "")
+                            genres_raw = j.get("genres") or j.get("genre") or j.get("style", "")
                             genre_str = ", ".join(g for g in genres_raw if g) if isinstance(genres_raw, list) else str(genres_raw) if genres_raw else ""
-                            notes = j.get("notes", "")[:200]
+                            notes = j.get("notes") or j.get("description") or ""
+                            notes = notes[:200]
                             self.db.update_tags(self._last_selected_id, tags, genre=genre_str, notes=notes)
                             for s in self._samples:
                                 if s["id"] == self._last_selected_id:
