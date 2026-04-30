@@ -192,9 +192,16 @@ class DB:
         return {"total": total, "tagged": tagged}
     def update_tags(self, sid: str, tags: list[str], genre=None, machine=None, notes=None):
         if not self.conn: self.connect()
-        self.conn.execute("UPDATE samples SET tags=?, genre=COALESCE(?,genre), machine=COALESCE(?,machine), ai_notes=COALESCE(?,ai_notes) WHERE id=?",
-                         (json.dumps(tags), genre, machine, notes, sid))
-        self.conn.commit()
+        try:
+            self.conn.execute("UPDATE samples SET tags=?, genre=COALESCE(?,genre), machine=COALESCE(?,machine), ai_notes=COALESCE(?,ai_notes) WHERE id=?",
+                             (json.dumps(tags), genre, machine, notes, sid))
+            self.conn.commit()
+        except sqlite3.Error:
+            self.conn = None
+            self.connect()
+            self.conn.execute("UPDATE samples SET tags=?, genre=COALESCE(?,genre), machine=COALESCE(?,machine), ai_notes=COALESCE(?,ai_notes) WHERE id=?",
+                             (json.dumps(tags), genre, machine, notes, sid))
+            self.conn.commit()
     async def get_some(self, limit: int = 50) -> list[dict]:
         """Quick fetch for random/initial load."""
         if not self.conn: self.connect()
