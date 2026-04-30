@@ -898,7 +898,7 @@ class CruxApp(App):
         height: 100%;
     }}
     #waveform-bar {{
-        height: 4;
+        height: 7;
         width: 100%;
         background: $bg;
         border-bottom: solid $border;
@@ -1451,28 +1451,29 @@ class CruxApp(App):
         except:
             width = 50
         waveform = render_waveform_ascii(path, width=width, height=3) or ""
-        try:
-            self.query_one("#waveform-view", Static).renderable = waveform
-        except:
-            pass
-        # Build detail text from sample data
-        detail_text = name
+        # Build detail text and push to waveform bar + kit detail panel
+        detail_text = name[:60]
         if sample:
             dur = sample.get("duration_ms", 0)
             dur_str = f"{dur//1000}s" if dur else "—"
             bpm = f"{int(sample['bpm'])}bpm" if sample.get("bpm") else "—"
-            machine = sample.get("machine") or "—"
-            folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else ""
+            machine = (sample.get("machine") or "—")[:20]
+            folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else "—"
             tags = (sample.get("tags") or [])
             tag_str = " ".join(tags[:6]) if tags else "—"
-            genre = sample.get("genre") or ""
-            # Escape brackets for Textual Rich markup
-        safe_name = name.replace("[", "(").replace("]", ")")
-        safe_folder = folder.replace("[", "(").replace("]", ")")
-        safe_machine = machine.replace("[", "(").replace("]", ")")
-        safe_tag_str = tag_str.replace("[", "(").replace("]", ")")
-        safe_genre = genre.replace("[", "(").replace("]", ")")
-        detail_text = f"{safe_name}\n{dur_str}  {bpm}  {safe_machine}\n{safe_folder}  {safe_genre}\ntags: {safe_tag_str}"
+            genre = (sample.get("genre") or "—")[:15]
+            safe_name = (name or "?").replace("[", "(").replace("]", ")")[:50]
+            safe_folder = folder.replace("[", "(").replace("]", ")")[:20]
+            safe_machine = machine.replace("[", "(").replace("]", ")")[:20]
+            safe_tag_str = tag_str.replace("[", "(").replace("]", ")")[:50]
+            safe_genre = genre.replace("[", "(").replace("]", ")")[:15]
+            detail_text = f"{safe_name}\n{dur_str}  {bpm}  {safe_machine}\n{safe_folder}  {safe_genre}\ntags: {safe_tag_str}"
+        # Show waveform + metadata in the top bar
+        try:
+            self.query_one("#waveform-view", Static).renderable = f"{waveform}\n{detail_text}"
+        except:
+            pass
+        # Also push to kit detail panel below grid
         try:
             self.query_one("#kit-detail", Static).renderable = detail_text
         except:
