@@ -1086,7 +1086,7 @@ class CruxApp(App):
             "shark":   {"bg": "#0b1a20", "surface": "#0f2128", "surface2": "#152a33", "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45", "dim": "#5a8a8a", "muted": "#3a5a65", "hover": "#0f2128"},
             "amber":   {"bg": "#1a0e00", "surface": "#2a1800", "surface2": "#3a2400", "fg": "#d4a030", "accent": "#ffb000", "border": "#5a3a00", "dim": "#8a6a20", "muted": "#6a4a10", "hover": "#3a2000"},
             "matrix":  {"bg": "#000000", "surface": "#0a0a0a", "surface2": "#0a1a0a", "fg": "#00cc00", "accent": "#00ff41", "border": "#003a00", "dim": "#008800", "muted": "#005500", "hover": "#0a1a0a"},
-            "paper":   {"bg": "#f5f0e0", "surface": "#ede5d5", "surface2": "#e3d9c7", "fg": "#5c4b37", "accent": "#8b6914", "border": "#cfc0aa", "dim": "#7a6a52", "muted": "#b09878", "hover": "#e3d9c7"},
+            "paper":   {"bg": "#f5f0e0", "surface": "#f5f0e0", "surface2": "#ede5d5", "fg": "#5c4b37", "accent": "#8b6914", "border": "#d8c8b0", "dim": "#7a6a52", "muted": "#b09878", "hover": "#ede5d5"},
         }
         self._theme = themes.get(theme, themes["default"])
         self.refresh_css()
