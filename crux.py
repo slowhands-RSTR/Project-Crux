@@ -898,7 +898,7 @@ class CruxApp(App):
         height: 100%;
     }}
     #waveform-bar {{
-        height: 7;
+        height: 4;
         width: 100%;
         background: $bg;
         border-bottom: solid $border;
@@ -1055,6 +1055,7 @@ class CruxApp(App):
         self._stats = {"total": 0, "tagged": 0}
         self._kit_index = 0
         self._current_audio: Optional[subprocess.Popen] = None
+        self._last_selected_id: Optional[str] = None
     
     def get_css_variables(self) -> dict[str, str]:
         """Return CSS variables matching the current theme."""
@@ -1198,6 +1199,29 @@ class CruxApp(App):
                 self.render_kit()
                 slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
                 self.set_status(f"added {s['name']} → {slot_name}")
+            return
+        
+        # /tag <words> — edit tags on last selected sample
+        if q.startswith("/tag "):
+            new_tags = q[5:].strip().split()
+            if self._last_selected_id and new_tags:
+                try:
+                    # Update in DB
+                    self.db.update_tags(self._last_selected_id, new_tags)
+                    # Update in-memory copies
+                    for s in self._samples:
+                        if s["id"] == self._last_selected_id:
+                            s["tags"] = new_tags
+                    for s in self._kit:
+                        if s and s["id"] == self._last_selected_id:
+                            s["tags"] = new_tags
+                    self.set_status(f"tags updated: {' '.join(new_tags)}")
+                    # Refresh display
+                    self.search(self._query)
+                except Exception as e:
+                    self.set_status(f"tag error: {e}")
+            else:
+                self.set_status("select a sample first")
             return
         
         # /prefix forces direct FTS5 search, bypasses LLM entirely
@@ -1444,14 +1468,7 @@ class CruxApp(App):
     
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
-        """Show waveform + sample info in top bar and kit detail panel."""
-        # Build waveform + metadata text
-        try:
-            cols = os.get_terminal_size().columns
-            width = min(cols // 2 - 4, 50)
-        except:
-            width = 40
-        waveform = render_waveform_ascii(path, width=width, height=3) or ""
+        """Show sample info in top bar and kit detail panel."""
         lines = [(name or "?")[:60]]
         if sample:
             dur = sample.get("duration_ms", 0)
@@ -1460,19 +1477,18 @@ class CruxApp(App):
             machine = (sample.get("machine") or "—")[:20]
             folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else "—"
             tags = (sample.get("tags") or [])
-            tag_str = " ".join(tags[:6]) if tags else "—"
+            tag_str = " ".join(tags) if tags else "—"
             genre = (sample.get("genre") or "—")[:15]
             lines.append(f"{dur_str}  {bpm}  {machine}")
             lines.append(f"{folder}  {genre}")
             lines.append(f"tags: {tag_str}")
+            lines.append("---")
+            lines.append('/tag <words> to edit')
         meta = "\n".join(lines)
-        # Top bar: waveform above, metadata below
-        top_text = f"{waveform}\n{meta}" if waveform else meta
         try:
-            self.query_one("#waveform-view", Static).update(top_text)
+            self.query_one("#waveform-view", Static).update(meta)
         except:
             pass
-        # Kit detail: metadata only (saves space)
         try:
             self.query_one("#kit-detail", Static).update(meta)
         except:
@@ -1529,6 +1545,8 @@ class CruxApp(App):
             path = sample.get("path", "")
         if path and os.path.exists(path):
             self._play_audio(path)
+        if sample:
+            self._last_selected_id = sample.get("id")
         self._show_waveform(path, name, sample=sample)
         self.set_status(f"▶ {name}")
     
