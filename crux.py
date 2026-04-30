@@ -898,7 +898,7 @@ class CruxApp(App):
         height: 100%;
     }}
     #waveform-bar {{
-        height: 7;
+        height: 4;
         width: 100%;
         background: $bg;
         border-bottom: solid $border;
@@ -1104,7 +1104,7 @@ class CruxApp(App):
                 id="prompt-bar",
             ),
             Container(
-                Static("", id="waveform-view"),
+                Static("~▲~ crüx\narrow to browse a sample", id="waveform-view"),
                 id="waveform-bar",
             ),
             Container(
@@ -1115,7 +1115,7 @@ class CruxApp(App):
                 Container(
                     Vertical(
                         ListView(id="kit-grid"),
-                        Static("", id="kit-detail"),
+                        Static("arrow to browse\na sample to see\ndetails here", id="kit-detail"),
                     ),
                     id="kit-panel",
                 ),
@@ -1130,12 +1130,6 @@ class CruxApp(App):
     
     def on_mount(self) -> None:
         self.load_theme()
-        # Set startup text for waveform bar
-        try:
-            self.query_one("#waveform-view", Static).renderable = "~▲~ crüx"
-            self.query_one("#kit-detail", Static).renderable = "select a sample to see details"
-        except:
-            pass
         self.query_one("#prompt-input", Input).focus()
         self.load_stats()
         self.search("")
