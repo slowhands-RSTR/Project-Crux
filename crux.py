@@ -1505,7 +1505,6 @@ class CruxApp(App):
         idx = lv.index
         if idx is None:
             return
-        # Force-update both panels with the sample name
         name = "?"
         if lv.id == "kit-grid" and 0 <= idx < KIT_SLOTS:
             self._kit_index = idx
@@ -1515,16 +1514,11 @@ class CruxApp(App):
         elif lv.id == "sample-list" and 0 <= idx < len(self._samples):
             s = self._samples[idx]
             name = s.get("name", "?")
-        # Set text in both widgets unconditionally
-        try:
-            self.query_one("#waveform-view", Static).renderable = f"▶ {name}"
-        except:
-            pass
-        try:
-            self.query_one("#kit-detail", Static).renderable = f"▶ {name}"
-        except:
-            pass
-        self.set_status(f"{lv.id}[{idx}]: {name}")
+        # Set both panels — remove try/except so crashes are loud
+        wf = self.query_one("#waveform-view", Static)
+        wf.renderable = f"TEST: {name}"
+        kd = self.query_one("#kit-detail", Static)
+        kd.renderable = f"TEST: {name}"
     
     @on(ListView.Selected)
     def handle_list_selected(self, event: ListView.Selected) -> None:
