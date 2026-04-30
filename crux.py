@@ -556,10 +556,10 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
     # Chunk into batches
     batches = [untagged[i:i + batch_size] for i in range(0, total, batch_size)]
     
-    sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. Analyze each sample's spectral data and filename. Always respond with ONLY valid JSON — no explanations, no markdown."}
+    sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. Rules:\n1. Tags describe WHAT the sample IS (instrument, source, character) — e.g. kick, 808, snare, clap, dark, punchy, lofi, bright, dirty\n2. Genres describe WHERE it fits — a sample can suit MULTIPLE genres (house AND techno share 909s, a dark kick works for both)\n3. Sonic qualifiers (dark, bright, lofi, clean, distorted, warm, airy, punchy, tight, boomy, gritty) go into the tags AND sonics arrays\n4. Use spectral data (centroid=brightness, flatness=noise/tonal, rms=loudness) to determine sonic character\n5. Always respond with ONLY valid JSON — no explanations, no markdown."}
     
     tagged = 0
-    concurrency = 4  # one per LM Studio slot
+    concurrency = 4
     sem = asyncio.Semaphore(concurrency)
     db_lock = asyncio.Lock()
     
@@ -584,7 +584,7 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                 folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
                 batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
             
-            user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples. Return ONLY this exact JSON structure:\n{{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genre\": \"techno\", \"notes\": \"Punchy 808 kick with fast decay\"}}]}}\n\nSamples to tag:\n{batch_text}"}
+            user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples. Return ONLY this exact JSON structure — genres is an ARRAY (1+ genres), sonics captures tonal character:\n{{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\", \"dark\", \"punchy\"], \"genres\": [\"techno\", \"house\"], \"sonics\": [\"dark\", \"punchy\", \"warm\"], \"notes\": \"Punchy 808 kick with dark sub-bass\"}}]}}\n\nSamples to tag:\n{batch_text}"}
             
             resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000)
             if not resp:
@@ -600,13 +600,27 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                     sid = entry.get("id", "")
                     if not sid and len(batch) == 1:
                         sid = batch[0]["id"]
+                    
                     tags = entry.get("tags", [])
-                    genre = entry.get("genre", "")
+                    # Merge sonics into tags for searchability
+                    sonics = entry.get("sonics", [])
+                    if sonics:
+                        for s in sonics:
+                            if s not in tags:
+                                tags.append(s)
+                    
+                    # Handle genres: array or legacy string
+                    genres_raw = entry.get("genres") or entry.get("genre", "")
+                    if isinstance(genres_raw, list):
+                        genre_str = ", ".join(g for g in genres_raw if g)
+                    else:
+                        genre_str = str(genres_raw) if genres_raw else ""
+                    
                     notes = entry.get("notes") or entry.get("description") or ""
                     notes = notes[:200]
                     if sid:
                         async with db_lock:
-                            db.update_tags(sid, tags, genre=genre, notes=notes)
+                            db.update_tags(sid, tags, genre=genre_str, notes=notes)
                         count += 1
             except Exception as e:
                 if app_ref:
@@ -1374,17 +1388,22 @@ class CruxApp(App):
                     }
                     char = describe_audio(feats)
                     folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else ""
-                    prompt = f"Sample: {sample['name']} | {folder} | {sample.get('machine') or ''} | {char}\nReturn JSON: {{\"tags\":[...],\"genre\":\"...\",\"notes\":\"...\"}}"
-                    sys_msg = {"role": "system", "content": "You are crüx. Generate accurate tags, genre, and one-line description from spectral data."}
+                    prompt = f"Sample: {sample['name']} | {folder} | {sample.get('machine') or ''} | {char}\nReturn JSON: {{\"tags\":[\"kick\",\"808\",\"dark\"],\"genres\":[\"techno\",\"house\"],\"sonics\":[\"dark\",\"punchy\"],\"notes\":\"...\"}}"
+                    sys_msg = {"role": "system", "content": "You are crüx. Tags describe what (kick, 808, dark). Genres are an array — a sample can fit multiple (techno, house). Sonics capture tonal character. Use spectral data."}
                     user_msg = {"role": "user", "content": prompt}
                     resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=500)
                     if resp:
                         try:
                             j = json.loads(resp)
                             tags = j.get("tags", [])
-                            genre = j.get("genre", "")
+                            sonics = j.get("sonics", [])
+                            for s_t in sonics:
+                                if s_t not in tags:
+                                    tags.append(s_t)
+                            genres_raw = j.get("genres") or j.get("genre", "")
+                            genre_str = ", ".join(g for g in genres_raw if g) if isinstance(genres_raw, list) else str(genres_raw) if genres_raw else ""
                             notes = j.get("notes", "")[:200]
-                            self.db.update_tags(self._last_selected_id, tags, genre=genre, notes=notes)
+                            self.db.update_tags(self._last_selected_id, tags, genre=genre_str, notes=notes)
                             for s in self._samples:
                                 if s["id"] == self._last_selected_id:
                                     s["tags"] = tags
