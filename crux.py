@@ -577,7 +577,6 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
     tagged = 0
     concurrency = 4
     sem = asyncio.Semaphore(concurrency)
-    db_lock = asyncio.Lock()
     
     async def _tag_batch(batch: list[dict]) -> int:
         nonlocal tagged
@@ -660,8 +659,7 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                 notes = entry.get("notes") or entry.get("description") or ""
                 notes = notes[:200]
                 if sid:
-                    async with db_lock:
-                        db.update_tags(sid, tags, genre=genre_str, notes=notes)
+                    db.update_tags(sid, tags, genre=genre_str, notes=notes)
                     count += 1
             return count
     
