@@ -114,7 +114,7 @@ LMSTUDIO_MODEL = _config["llm"]["model"]
 LLM_API_KEY = _config["llm"].get("api_key", "")
 LLM_PROVIDER = _config["llm"].get("provider", "lm_studio")
 DEFAULT_CANDIDATES = 100
-SLOT_NAMES = ["Kick","Snare","Clap","Perc","Tom","Ride","Hat","Crash",
+SLOT_NAMES = ["Kick","Snare","Clap","Perc","Tom","Hat","Ride","Crash",
               "Shaker","Cowbell","Conga","Bongo","Clav","Marimba","Fx","Bass"]
 KIT_SLOTS = _config["ui"]["kit_slots"]
 PAGE_SIZE = _config["ui"]["samples_per_page"]
