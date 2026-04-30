@@ -595,12 +595,16 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
             
             user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples. Return EXACTLY {len(batch)} entries in the samples array, one per sample above. EVERY sample needs genres (min 1).\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"techno\", \"house\"], \"sonics\": [\"dark\", \"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
             
-            # Retry once on failure
             resp = None
             for attempt in range(2):
-                resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000)
-                if resp:
-                    break
+                try:
+                    resp = await asyncio.wait_for(
+                        llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000),
+                        timeout=35)
+                    if resp:
+                        break
+                except (asyncio.TimeoutError, Exception):
+                    pass
                 await asyncio.sleep(1)
             if not resp:
                 return 0
