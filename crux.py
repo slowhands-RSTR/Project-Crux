@@ -560,30 +560,11 @@ class SettingsScreen(Screen):
         Binding("ctrl+s", "save", "Save", priority=True),
     ]
     
-    CSS = """
-    SettingsScreen { background: #0b1a20; }
-    #settings-wrap { width: 60; height: 100%; margin: 1 2; }
-    .shdr { color: #1a9e9e; text-style: bold; height: 2; }
-    .slbl { color: #b8c8c8; height: 2; }
-    SettingsScreen Input { background: #0f2128; color: #e8f0f0; border: solid #1a3a45; height: 3; min-width: 40; }
-    SettingsScreen Input:focus { border: solid #1a9e9e; }
-    SettingsScreen Select { background: #0f2128; color: #e8f0f0; border: solid #1a3a45; min-width: 40; }
-    SettingsScreen Button { background: #152a33; color: #b8c8c8; border: solid #1a3a45; height: 3; min-width: 14; padding: 0 2; }
-    SettingsScreen Button:hover { border: solid #1a9e9e; }
-    SettingsScreen Button.primary { background: #1a9e9e; color: #0b1a20; }
-    #prov-btns { layout: horizontal; height: 5; margin: 0 0 1 0; }
-    #prov-btns Button { width: 1fr; min-width: 12; height: 3; }
-    #s-actions { height: 5; margin-top: 1; }
-    #s-actions Button { height: 3; }
-    #s-result { color: #5a8a8a; height: 2; }
-    """
-    
     def action_close_settings(self):
         self.dismiss(None)
     
     @staticmethod
     def _normalize_theme(val: str) -> str:
-        """Normalize theme value, falling back to shark on any invalid value."""
         valid = {"shark", "amber", "matrix", "paper"}
         return val if val in valid else "shark"
 
@@ -591,6 +572,12 @@ class SettingsScreen(Screen):
         super().__init__()
         self.cfg = load_config()
         self._dirty = False
+        t = theme_colors or {
+            "bg": "#0b1a20", "surface": "#0f2128", "surface2": "#152a33",
+            "fg": "#b8c8c8", "accent": "#1a9e9e", "border": "#1a3a45",
+            "dim": "#5a8a8a",
+        }
+        self._theme = t
     
     def compose(self):
         llm = self.cfg.get("llm", {})
@@ -637,6 +624,24 @@ class SettingsScreen(Screen):
     
     def on_mount(self):
         self._highlight_provider()
+        # Apply theme colors via inline styles
+        t = self._theme
+        try:
+            self.screen.styles.background = t["bg"]
+            for wid in ["s-url", "s-model", "s-key", "s-lib"]:
+                w = self.query_one(f"#{wid}", Input)
+                w.styles.background = t["surface"]
+                w.styles.color = t["fg"]
+                w.styles.border = ("solid", t["border"])
+            try:
+                sel = self.query_one("#s-theme", Select)
+                sel.styles.background = t["surface"]
+                sel.styles.color = t["fg"]
+                sel.styles.border = ("solid", t["border"])
+            except:
+                pass
+        except:
+            pass
     
     def _highlight_provider(self):
         prov = self.cfg.get("llm", {}).get("provider", "lm_studio")
@@ -1002,10 +1007,14 @@ class CruxApp(App):
     #sample-list, #kit-grid, #import-log {{
         scrollbar-color: $muted;
         scrollbar-color-hover: $dim;
+        scrollbar-background: $bg;
+        scrollbar-background-hover: $bg;
     }}
     ListView {{
         scrollbar-color: $muted;
         scrollbar-color-hover: $dim;
+        scrollbar-background: $bg;
+        scrollbar-background-hover: $bg;
     }}
     """
     
@@ -1949,7 +1958,8 @@ class CruxApp(App):
                 self.search(self._query)
                 self.render_kit()
                 self.set_status("Settings saved")
-        self.push_screen(SettingsScreen(), _on_settings_done)
+        t = getattr(self, '_theme', None)
+        self.push_screen(SettingsScreen(theme_colors=t), _on_settings_done)
     
     def action_focus_next(self):
         """Cycle focus between sample list and kit grid only (skip prompt input)."""
