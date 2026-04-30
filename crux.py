@@ -1444,15 +1444,9 @@ class CruxApp(App):
     
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
-        """Render an ASCII waveform for the given audio file."""
-        try:
-            cols = os.get_terminal_size().columns
-            width = min(cols // 2 - 4, 60)
-        except:
-            width = 50
-        waveform = render_waveform_ascii(path, width=width, height=3) or ""
-        # Build detail text and push to waveform bar + kit detail panel
-        detail_text = name[:60]
+        """Show sample info in waveform bar and kit detail panel."""
+        # Build display text from sample data
+        lines = [name[:60]]
         if sample:
             dur = sample.get("duration_ms", 0)
             dur_str = f"{dur//1000}s" if dur else "—"
@@ -1462,20 +1456,13 @@ class CruxApp(App):
             tags = (sample.get("tags") or [])
             tag_str = " ".join(tags[:6]) if tags else "—"
             genre = (sample.get("genre") or "—")[:15]
-            safe_name = (name or "?").replace("[", "(").replace("]", ")")[:50]
-            safe_folder = folder.replace("[", "(").replace("]", ")")[:20]
-            safe_machine = machine.replace("[", "(").replace("]", ")")[:20]
-            safe_tag_str = tag_str.replace("[", "(").replace("]", ")")[:50]
-            safe_genre = genre.replace("[", "(").replace("]", ")")[:15]
-            detail_text = f"{safe_name}\n{dur_str}  {bpm}  {safe_machine}\n{safe_folder}  {safe_genre}\ntags: {safe_tag_str}"
-        # Show waveform + metadata in the top bar
+            lines.append(f"{dur_str}  {bpm}  {machine}")
+            lines.append(f"{folder}  {genre}")
+            lines.append(f"tags: {tag_str}")
+        text = "\n".join(lines)
         try:
-            self.query_one("#waveform-view", Static).renderable = f"{waveform}\n{detail_text}"
-        except:
-            pass
-        # Also push to kit detail panel below grid
-        try:
-            self.query_one("#kit-detail", Static).renderable = detail_text
+            self.query_one("#waveform-view", Static).renderable = text
+            self.query_one("#kit-detail", Static).renderable = text
         except:
             pass
     
