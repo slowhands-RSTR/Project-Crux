@@ -504,11 +504,14 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
     imported = 0
     last_report = 0
     
-    for i, fpath in enumerate(files):
+    # Process files concurrently — up to 4 librosa analyses at a time
+    loop = asyncio.get_running_loop()
+    
+    async def _import_one(fpath: str) -> bool:
+        nonlocal imported
         name = Path(fpath).stem
-        feats = analyze_audio(fpath)
+        feats = await loop.run_in_executor(None, analyze_audio, fpath)
         sid = str(uuid.uuid4())
-        
         try:
             db.conn.execute(
                 "INSERT OR IGNORE INTO samples (id, name, path, duration_ms, bpm, rms_db, spectral_centroid_hz, spectral_flatness, transient_score, onset_confidence) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -518,11 +521,16 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
                  feats["onset_confidence"]))
             db.conn.commit()
             imported += 1
+            return True
         except:
-            continue
+            return False
+    
+    for i in range(0, total, 4):
+        window = files[i:i + 4]
+        await asyncio.gather(*(_import_one(f) for f in window))
         
         # Report every 5%
-        pct = (i + 1) * 100 // total
+        pct = min((i + 4) * 100 // total, 100) if i + 4 < total else 100
         if pct // 5 > last_report // 5:
             last_report = pct
             msg = f"[{pct}%] {i+1}/{total} imported"
@@ -1667,6 +1675,9 @@ class CruxApp(App):
                 self._kit[i] = s
                 self._kit_locked[i] = True
             assigned = len(locked_slots)
+            # Fetch all slot samples concurrently
+            fetch_tasks = []
+            slot_indices = []
             for entry in slots:
                 idx = entry.get("slot")
                 sid = entry.get("sampleId")
@@ -1675,8 +1686,11 @@ class CruxApp(App):
                 if idx < 0 or idx >= KIT_SLOTS:
                     continue
                 if self._kit_locked[idx]:
-                    continue  # Don't touch locked slots
-                s = await self.db.get_sample(sid)
+                    continue
+                fetch_tasks.append(self.db.get_sample(sid))
+                slot_indices.append(idx)
+            results = await asyncio.gather(*fetch_tasks) if fetch_tasks else []
+            for idx, s in zip(slot_indices, results):
                 if s:
                     self._kit[idx] = s
                     assigned += 1
