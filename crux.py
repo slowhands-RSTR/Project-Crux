@@ -926,7 +926,10 @@ class CruxApp(App):
     ListItem:hover {{ background: $hover; }}
     ListItem > Label {{ color: $fg; }}
     ListView:focus .list-item--focused {{
-        background: $hover;
+        background: $accent 20%;
+    }}
+    ListItem > Label {{
+        color: $fg;
     }}
     #kit-panel {{
         background: $surface;
@@ -1013,6 +1016,14 @@ class CruxApp(App):
         Binding("delete", "clear_kit_slot", "Clear slot"),
         Binding("j", "cursor_down", "↓"),
         Binding("k", "cursor_up", "↑"),
+        Binding("1", "slot_1", "Slot 1"),
+        Binding("2", "slot_2", "Slot 2"),
+        Binding("3", "slot_3", "Slot 3"),
+        Binding("4", "slot_4", "Slot 4"),
+        Binding("5", "slot_5", "Slot 5"),
+        Binding("6", "slot_6", "Slot 6"),
+        Binding("7", "slot_7", "Slot 7"),
+        Binding("8", "slot_8", "Slot 8"),
     ]
     
     def __init__(self, import_path=None):
@@ -1094,7 +1105,7 @@ class CruxApp(App):
                 id="content-area",
             ),
             Container(
-                Static("↑↓/jk=navigate · enter=add · delete=clear · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
+                Static("↑↓/jk=navigate · enter=add · 1-8=slot · delete=clear · p=play · space=lock · /=search · Tab=browse/kit · Ctrl+S=settings"),
                 id="status-bar",
             ),
             id="main-container",
@@ -1267,14 +1278,22 @@ class CruxApp(App):
                 pass
         
         # 3) For each drum slot type, search specifically for that type + query
+        slot_aliases = {
+            "Hat": ["Hat", "Hihat", "Hi-hat", "Cymbal", "OH", "CH", "Open Hat", "Closed Hat"],
+            "Ride": ["Ride", "Cymbal"],
+            "Crash": ["Crash", "Cymbal"],
+            "Perc": ["Perc", "Percussion", "Shaker", "Tambourine", "Click", "Rim"],
+        }
         for slot_name in list(SLOT_NAMES[:8]):
             try:
-                slot_q = f"{slot_name} {search_query}"
-                slot_results = await self.db.search(slot_q, 30)
-                for s in slot_results:
-                    if s["id"] not in seen_ids:
-                        all_candidates.append(s)
-                        seen_ids.add(s["id"])
+                terms = slot_aliases.get(slot_name, [slot_name])
+                for term in terms[:2]:  # max 2 search terms per slot
+                    slot_q = f"{term} {search_query}"
+                    slot_results = await self.db.search(slot_q, 20)
+                    for s in slot_results:
+                        if s["id"] not in seen_ids:
+                            all_candidates.append(s)
+                            seen_ids.add(s["id"])
             except:
                 pass
         
@@ -1316,6 +1335,7 @@ class CruxApp(App):
                 ("kick", "KICK"), ("kik", "KICK"), ("bd", "KICK"),
                 ("snare", "SNARE"), ("snr", "SNARE"), ("sna", "SNARE"),
                 ("hat", "HAT"), ("hihat", "HAT"), ("hi-hat", "HAT"), ("hh", "HAT"),
+                ("oh", "HAT"), ("ch", "HAT"), ("open_hat", "HAT"), ("closed_hat", "HAT"),
                 ("clap", "CLAP"),
                 ("perc", "PERC"), ("tamb", "PERC"), ("shaker", "PERC"),
                 ("tom", "TOM"),
@@ -1606,6 +1626,7 @@ class CruxApp(App):
                     ("kick", "KICK"), ("kik", "KICK"), ("bd", "KICK"),
                     ("snare", "SNARE"), ("snr", "SNARE"), ("sna", "SNARE"),
                     ("hat", "HAT"), ("hihat", "HAT"), ("hh", "HAT"),
+                    ("oh", "HAT"), ("ch", "HAT"), ("open_hat", "HAT"), ("closed_hat", "HAT"),
                     ("clap", "CLAP"),
                     ("perc", "PERC"), ("tamb", "PERC"), ("shaker", "PERC"),
                     ("tom", "TOM"),
@@ -1766,6 +1787,27 @@ class CruxApp(App):
         lv = self.focused
         if lv and hasattr(lv, "action_cursor_down"):
             lv.action_cursor_down()
+    
+    def _add_highlighted_to_slot(self, slot_idx: int):
+        """Add the highlighted sample from browse list directly to a specific kit slot."""
+        lv = self.query_one("#sample-list", ListView)
+        idx = lv.index
+        if idx is not None and 0 <= idx < len(self._samples):
+            s = self._samples[idx]
+            self._kit_index = slot_idx
+            self._kit[slot_idx] = s
+            self.render_kit()
+            slot_name = SLOT_NAMES[slot_idx] if slot_idx < len(SLOT_NAMES) else f"Slot {slot_idx+1}"
+            self.set_status(f"{s['name']} → {slot_name}")
+    
+    def action_slot_1(self): self._add_highlighted_to_slot(0)
+    def action_slot_2(self): self._add_highlighted_to_slot(1)
+    def action_slot_3(self): self._add_highlighted_to_slot(2)
+    def action_slot_4(self): self._add_highlighted_to_slot(3)
+    def action_slot_5(self): self._add_highlighted_to_slot(4)
+    def action_slot_6(self): self._add_highlighted_to_slot(5)
+    def action_slot_7(self): self._add_highlighted_to_slot(6)
+    def action_slot_8(self): self._add_highlighted_to_slot(7)
     
     def action_export(self):
         """Open the export modal."""
