@@ -1506,19 +1506,24 @@ class CruxApp(App):
         if idx is None:
             return
         name = "?"
+        path = ""
         if lv.id == "kit-grid" and 0 <= idx < KIT_SLOTS:
             self._kit_index = idx
             s = self._kit[idx]
             if s:
                 name = s.get("name", "?")
+                path = s.get("path", "")
         elif lv.id == "sample-list" and 0 <= idx < len(self._samples):
             s = self._samples[idx]
             name = s.get("name", "?")
-        # Set both panels — remove try/except so crashes are loud
+            path = s.get("path", "")
+        if path and os.path.exists(path):
+            self._play_audio(path)
+        # Update panels
         wf = self.query_one("#waveform-view", Static)
-        wf.renderable = f"TEST: {name}"
+        wf.renderable = f"▶ {name}"
         kd = self.query_one("#kit-detail", Static)
-        kd.renderable = f"TEST: {name}"
+        kd.renderable = f"▶ {name}"
     
     @on(ListView.Selected)
     def handle_list_selected(self, event: ListView.Selected) -> None:
