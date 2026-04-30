@@ -535,11 +535,11 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
     return imported
 
 # ─── TUI Widgets & Screens ────────────────────────────────────────────────────
-async def tag_pipeline(db: DB, batch_size: int = 5, app_ref=None, pause_check=None):
+async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=None):
     """LLM-tag untagged samples: generate tags, genre, and ai_notes from spectral data.
-    Pause between batches if pause_check() returns True."""
+    Uses 4 concurrent workers — one per LM Studio slot — for parallel tagging.
+    Pauses between batches if pause_check() returns True."""
     if not db.conn: db.connect()
-    # Re-query each batch so we pick up where paused
     cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]' OR ai_notes IS NULL OR ai_notes = '' ORDER BY RANDOM()")
     untagged = [db._parse_row(r) for r in cur.fetchall()]
     total = len(untagged)
@@ -548,59 +548,95 @@ async def tag_pipeline(db: DB, batch_size: int = 5, app_ref=None, pause_check=No
         if app_ref: app_ref.post_message(StatusMsg(msg))
         return 0
     
+    # Chunk into batches
+    batches = [untagged[i:i + batch_size] for i in range(0, total, batch_size)]
+    
+    sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. Analyze each sample's spectral data and filename. Always respond with ONLY valid JSON — no explanations, no markdown."}
+    
     tagged = 0
-    start = 0
-    while start < total:
-        # Check pause before each batch
+    concurrency = 4  # one per LM Studio slot
+    sem = asyncio.Semaphore(concurrency)
+    db_lock = asyncio.Lock()
+    
+    async def _tag_batch(batch: list[dict]) -> int:
+        nonlocal tagged
+        # Check pause before starting
         if pause_check and pause_check():
-            # Wait until unpaused
+            return 0
+        
+        async with sem:
+            batch_text = ""
+            for s in batch:
+                feats = {
+                    "duration_ms": s.get("duration_ms", 0),
+                    "bpm": s.get("bpm"),
+                    "rms_db": s.get("rms_db"),
+                    "spectral_centroid_hz": s.get("spectral_centroid_hz"),
+                    "spectral_flatness": s.get("spectral_flatness"),
+                    "transient_score": s.get("transient_score"),
+                    "onset_confidence": s.get("onset_confidence"),
+                }
+                char = describe_audio(feats)
+                folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
+                batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
+            
+            user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples. Return ONLY this exact JSON structure:\n{{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genre\": \"techno\", \"notes\": \"Punchy 808 kick with fast decay\"}}]}}\n\nSamples to tag:\n{batch_text}"}
+            
+            resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000)
+            if not resp:
+                return 0
+            
+            count = 0
+            try:
+                j = json.loads(resp)
+                entries = j.get("samples")
+                if entries is None:
+                    entries = [j]
+                for entry in entries:
+                    sid = entry.get("id", "")
+                    if not sid and len(batch) == 1:
+                        sid = batch[0]["id"]
+                    tags = entry.get("tags", [])
+                    genre = entry.get("genre", "")
+                    notes = entry.get("notes") or entry.get("description") or ""
+                    notes = notes[:200]
+                    if sid:
+                        async with db_lock:
+                            db.update_tags(sid, tags, genre=genre, notes=notes)
+                        count += 1
+            except Exception as e:
+                if app_ref:
+                    app_ref.set_status(f"tag parse error: {e}")
+                import traceback
+                traceback.print_exc()
+            return count
+    
+    # Process batches concurrently with pause support
+    batch_idx = 0
+    while batch_idx < len(batches):
+        # On pause, requery for remaining and restart fresh
+        if pause_check and pause_check():
             while pause_check():
                 await asyncio.sleep(0.5)
-            # Re-query to get remaining untagged (resume-friendly)
             cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]' OR ai_notes IS NULL OR ai_notes = '' ORDER BY RANDOM()")
-            untagged = [db._parse_row(r) for r in cur.fetchall()]
-            total = len(untagged)
-            start = 0
-            if total == 0:
+            remaining = [db._parse_row(r) for r in cur.fetchall()]
+            batches = [remaining[i:i + batch_size] for i in range(0, len(remaining), batch_size)]
+            batch_idx = 0
+            if not batches:
                 break
-        batch = untagged[start:start + batch_size]
-        batch = untagged[start:start + batch_size]
-        batch_text = ""
-        for s in batch:
-            feats = {
-                "duration_ms": s.get("duration_ms", 0),
-                "bpm": s.get("bpm"),
-                "rms_db": s.get("rms_db"),
-                "spectral_centroid_hz": s.get("spectral_centroid_hz"),
-                "spectral_flatness": s.get("spectral_flatness"),
-                "transient_score": s.get("transient_score"),
-                "onset_confidence": s.get("onset_confidence"),
-            }
-            char = describe_audio(feats)
-            folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
-            batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
-        
-        sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. Analyze each sample's spectral data and filename to generate accurate tags, genre, and a one-line description. Be specific and honest — don't guess."}
-        user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples. For each, return: tags (3-6 keywords), genre, and a one-line sonic description.\n\n{batch_text}\nJSON: {{\"samples\":[{{\"id\":\"...\",\"tags\":[\"kick\",\"808\"],\"genre\":\"techno\",\"notes\":\"Punchy 808 kick with fast decay, good for driving techno\"}},...]}}"}
-        
-        resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000)
-        if not resp:
             continue
-        try:
-            j = json.loads(resp)
-            for entry in j.get("samples", []):
-                sid = entry.get("id")
-                tags = entry.get("tags", [])
-                genre = entry.get("genre", "")
-                notes = entry.get("notes", "")[:200]
-                if sid:
-                    db.update_tags(sid, tags, genre=genre, notes=notes)
-                    tagged += 1
-        except:
-            pass
+        
+        # Fire next window of concurrent batches
+        window = batches[batch_idx:batch_idx + concurrency]
+        results = await asyncio.gather(*(_tag_batch(b) for b in window))
+        batch_tagged = sum(results)
+        tagged += batch_tagged
+        batch_idx += concurrency
+        
         msg = f"tagged {tagged}/{total}"
-        if app_ref: app_ref.post_message(StatusMsg(msg))
-        start += batch_size
+        if app_ref:
+            app_ref.post_message(StatusMsg(msg))
+    
     return tagged
 
 class StatusMsg(Message):
@@ -1948,7 +1984,8 @@ class CruxApp(App):
         
         self._spin_task = asyncio.create_task(_pausable_spinner("tagging samples"))
         try:
-            results = await tag_pipeline(self.db, batch_size=5, app_ref=self, pause_check=_is_paused)
+            cfg_batch = _config.get("import", {}).get("tag_batch_size", 12)
+            results = await tag_pipeline(self.db, batch_size=cfg_batch, app_ref=self, pause_check=_is_paused)
             if results:
                 self._stats = await self.db.get_stats()
                 self._update_header()
