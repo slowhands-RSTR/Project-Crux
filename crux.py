@@ -1130,6 +1130,12 @@ class CruxApp(App):
     
     def on_mount(self) -> None:
         self.load_theme()
+        # Set startup text for waveform bar
+        try:
+            self.query_one("#waveform-view", Static).renderable = "~▲~ crüx"
+            self.query_one("#kit-detail", Static).renderable = "select a sample to see details"
+        except:
+            pass
         self.query_one("#prompt-input", Input).focus()
         self.load_stats()
         self.search("")
