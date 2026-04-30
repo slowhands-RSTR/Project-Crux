@@ -965,7 +965,7 @@ class CruxApp(App):
     #kit-detail {{
         height: 8;
         padding: 0 1;
-        color: $dim;
+        color: $fg;
         border-top: solid $border;
         overflow: hidden;
     }}
