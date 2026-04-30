@@ -962,6 +962,13 @@ class CruxApp(App):
         padding: 0;
     }}
     #kit-grid ListItem > Label {{ color: $fg; }}
+    #kit-detail {{
+        height: 7;
+        padding: 0 1;
+        color: $dim;
+        border-top: solid $border;
+        overflow: hidden;
+    }}
     .kit-slot {{ padding: 0 1; }}
     .slot-label {{ color: $accent; text-style: bold; min-width: 8; }}
     .slot-name {{ color: $fg; }}
@@ -1107,6 +1114,7 @@ class CruxApp(App):
                 Container(
                     Vertical(
                         ListView(id="kit-grid"),
+                        Static("", id="kit-detail"),
                     ),
                     id="kit-panel",
                 ),
@@ -1431,16 +1439,38 @@ class CruxApp(App):
             self.search(self._query)
     
     # ─── Kit ─────────────────────────────────────────────────────────────────
-    def _show_waveform(self, path: str, name: str):
+    def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
         """Render an ASCII waveform for the given audio file."""
         wf = self.query_one("#waveform-view", Static)
-        # Get terminal width for waveform size
         try:
             cols = os.get_terminal_size().columns
-            width = min(cols // 2 - 4, 60)  # Fit in left panel, max 60
+            width = min(cols // 2 - 4, 60)
         except:
             width = 50
-        wf.renderable = render_waveform_ascii(path, width=width, height=3) or ""
+        waveform = render_waveform_ascii(path, width=width, height=3) or ""
+        wf.renderable = waveform
+        # Update kit detail panel
+        try:
+            detail = self.query_one("#kit-detail", Static)
+            if sample:
+                dur = sample.get("duration_ms", 0)
+                dur_str = f"{dur//1000}s" if dur else "—"
+                bpm = f"{int(sample['bpm'])}bpm" if sample.get("bpm") else "—"
+                machine = sample.get("machine") or "—"
+                folder = os.path.basename(os.path.dirname(sample.get("path",""))) if sample.get("path") else ""
+                tags = (sample.get("tags") or [])
+                tag_str = " ".join(tags[:6]) if tags else "—"
+                genre = sample.get("genre") or ""
+                detail.renderable = (
+                    f"{name}\n"
+                    f"{dur_str}  {bpm}  {machine}\n"
+                    f"{folder}  {genre}\n"
+                    f"tags: {tag_str}"
+                )
+            else:
+                detail.renderable = name
+        except:
+            pass
     
     def render_kit(self):
         lv = self.query_one("#kit-grid", ListView)
@@ -1484,10 +1514,15 @@ class CruxApp(App):
                     path = s.get("path", "")
                     if path and os.path.exists(path):
                         self._play_audio(path)
-                        self._show_waveform(path, s.get('name','?'))
+                        self._show_waveform(path, s.get('name','?'), sample=s)
                         self.set_status(f"▶ {s['name']}  |  slot: {slot_name}")
                 else:
                     self.set_status(f"slot: {slot_name} (empty)")
+                    # Clear kit detail when slot is empty
+                    try:
+                        self.query_one("#kit-detail", Static).renderable = ""
+                    except:
+                        pass
         elif lv.id == "sample-list":
             idx = lv.index
             if idx is not None and 0 <= idx < len(self._samples):
@@ -1496,7 +1531,7 @@ class CruxApp(App):
                 path = s.get("path", "")
                 if path and os.path.exists(path):
                     self._play_audio(path)
-                    self._show_waveform(path, s.get('name','?'))
+                    self._show_waveform(path, s.get('name','?'), sample=s)
                 target = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
                 self.set_status(f"▶ {s['name']}  ·  Enter → {target}")
     
