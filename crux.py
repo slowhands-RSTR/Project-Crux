@@ -1022,8 +1022,8 @@ class CruxApp(App):
 
         Binding("space", "toggle_lock", "Lock/unlock"),
         Binding("delete", "clear_kit_slot", "Clear slot"),
-        Binding("j", "cursor_down", "↓", priority=True),
-        Binding("k", "cursor_up", "↑", priority=True),
+        Binding("j", "cursor_down", "↓"),
+        Binding("k", "cursor_up", "↑"),
         Binding("1", "slot_1", "Slot 1"),
         Binding("2", "slot_2", "Slot 2"),
         Binding("3", "slot_3", "Slot 3"),
@@ -1498,8 +1498,9 @@ class CruxApp(App):
         if lv.children:
             lv.index = min(self._kit_index, len(lv.children) - 1)
     
-    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        """Auto-select slot on arrow key navigation, auto-audition (kit grid only)."""
+    @on(ListView.Highlighted)
+    def handle_list_highlight(self, event: ListView.Highlighted) -> None:
+        """Auto-select slot on arrow key navigation, auto-audition."""
         lv = event.list_view
         if lv.id == "kit-grid":
             idx = lv.index
@@ -1532,7 +1533,8 @@ class CruxApp(App):
                 target = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
                 self.set_status(f"▶ {s['name']}  ·  Enter → {target}")
     
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
+    @on(ListView.Selected)
+    def handle_list_selected(self, event: ListView.Selected) -> None:
         """Enter key — set target slot from kit-grid, or add sample from browse."""
         lv = event.list_view
         if lv.id == "kit-grid":
@@ -1825,56 +1827,17 @@ class CruxApp(App):
         slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
         self.set_status(f"{slot_name} cleared")
     
-    def _update_detail_for_focused(self):
-        """Update waveform and detail panel for the currently highlighted item."""
-        focused_id = self.focused.id if self.focused else None
-        if focused_id == "kit-grid":
-            idx = self.query_one("#kit-grid", ListView).index
-            if idx is not None and 0 <= idx < KIT_SLOTS:
-                self._kit_index = idx
-                s = self._kit[idx]
-                if s:
-                    path = s.get("path", "")
-                    if path and os.path.exists(path):
-                        self._play_audio(path)
-                        self._show_waveform(path, s.get('name','?'), sample=s)
-        elif focused_id == "sample-list":
-            lv = self.query_one("#sample-list", ListView)
-            idx = lv.index
-            if idx is not None and 0 <= idx < len(self._samples):
-                s = self._samples[idx]
-                path = s.get("path", "")
-                if path and os.path.exists(path):
-                    self._play_audio(path)
-                    self._show_waveform(path, s.get('name','?'), sample=s)
-    
     def action_cursor_up(self):
-        """Move cursor up (Vim k / arrows)."""
-        if self.focused and self.focused.id == "prompt-input":
-            return
-        for lid in ("sample-list", "kit-grid"):
-            try:
-                lv = self.query_one(f"#{lid}", ListView)
-                if lv.index is not None and lv.index > 0:
-                    lv.index -= 1
-                    self._update_detail_for_focused()
-                    return
-            except:
-                pass
+        """Move cursor up (Vim k style)."""
+        lv = self.focused
+        if lv and hasattr(lv, "action_cursor_up"):
+            lv.action_cursor_up()
     
     def action_cursor_down(self):
-        """Move cursor down (Vim j / arrows)."""
-        if self.focused and self.focused.id == "prompt-input":
-            return
-        for lid in ("sample-list", "kit-grid"):
-            try:
-                lv = self.query_one(f"#{lid}", ListView)
-                if lv.index is not None and lv.index < len(lv) - 1:
-                    lv.index += 1
-                    self._update_detail_for_focused()
-                    return
-            except:
-                pass
+        """Move cursor down (Vim j style)."""
+        lv = self.focused
+        if lv and hasattr(lv, "action_cursor_down"):
+            lv.action_cursor_down()
     
     def _add_highlighted_to_slot(self, slot_idx: int):
         """Add the highlighted sample from browse list directly to a specific kit slot."""
