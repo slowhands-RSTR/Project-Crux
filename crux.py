@@ -1084,6 +1084,7 @@ class ExportScreen(Screen):
             except:
                 pass
     
+    @on(Button.Pressed)
     def on_button_pressed(self, event):
         btn_id = event.button.id
         if btn_id and btn_id.startswith("f-"):
