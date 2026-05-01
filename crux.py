@@ -577,7 +577,7 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
     # Chunk into batches
     batches = [untagged[i:i + batch_size] for i in range(0, total, batch_size)]
     
-    sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. RULES:\n- 'tags': instrument type + sonic character (kick, 808, snare, clap, hat, dark, punchy, lofi, bright, warm, dirty, clean, boomy, tight, gritty, airy)\n- 'genres': REQUIRED for EVERY sample. Minimum 1 genre. If uncertain, default to ['house']. Common: house, techno, drum-and-bass, hip-hop, trap, ambient, dub, breakbeat, garage, idm, bass, downtempo, electro\n- 'sonics': tonal character words derived from spectral data (bright=high centroid, dark=low centroid, noisy=high flatness, pure=low flatness, loud=high rms, quiet=low rms)\n- Use filename as primary instrument indicator\n- Return EXACTLY {len(batch)} entries — one per sample\n- Return ONLY valid JSON. No markdown, no explanation."}
+    sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. RULES:\n- 'tags': instrument type + sonic character (kick, 808, snare, clap, hat, dark, punchy, lofi, bright, warm, dirty, clean, boomy, tight, gritty, airy)\n- 'genres': REQUIRED for EVERY sample. Minimum 1 genre. If uncertain, default to ['house'].\n- Use filename as primary instrument indicator\n- Return EXACTLY {len(batch)} entries\n- Return ONLY raw JSON. No markdown, no backticks, no code blocks, no explanations."}]}
     
     tagged = 0
     concurrency = 4
@@ -622,17 +622,29 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
             
             count = 0
             entries = []
+            
+            # Strip markdown code block wrappers (gemma loves adding ```json...```)
+            clean = resp.strip()
+            if clean.startswith("```"):
+                clean = clean.split("```")[1]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+                clean = clean.strip()
+            
             try:
-                j = json.loads(resp)
-                entries = j.get("samples")
-                if entries is None:
-                    entries = [j]
+                j = json.loads(clean)
+                if isinstance(j, list):
+                    entries = j
+                else:
+                    entries = j.get("samples")
+                    if entries is None:
+                        entries = [j]
             except json.JSONDecodeError:
                 pass
             
             # If full JSON parse failed, try to salvage individual sample objects
             if not entries:
-                for sample_json in re.finditer(r'\{"id":\s*"[^"]+"[^}]+\}', resp, re.DOTALL):
+                for sample_json in re.finditer(r'\{"id":\s*"[^"]+"[^}]+\}', clean, re.DOTALL):
                     try:
                         entry = json.loads(sample_json.group())
                         if entry.get("id"):
