@@ -13,8 +13,7 @@ Usage:
 
 import sys, os, sqlite3, re, json, subprocess, time, asyncio, uuid, concurrent.futures
 
-# Debug log path — set once, used everywhere
-__log_path = os.path.expanduser("~/.crux_debug.log")
+
 
 # Python version check — 3.9 segfaults on macOS with async HTTP
 if sys.version_info < (3, 10):
@@ -359,21 +358,19 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
     for attempt in range(3):
         try:
             connector = aiohttp.TCPConnector(force_close=True)
-            timeout_obj = aiohttp.ClientTimeout(total=300)
+            _to = 300 if "localhost" in LMSTUDIO_URL or "127.0.0.1" in LMSTUDIO_URL else 60
+            timeout_obj = aiohttp.ClientTimeout(total=_to)
             async with aiohttp.ClientSession(timeout=timeout_obj, connector=connector) as session:
                 async with session.post(LMSTUDIO_URL, headers=headers, json=body) as resp:
                     data = await resp.json()
                     c = LLMAdapter.extract_content(data)
                     if c:
                         return c
-                    with open(__log_path, "a") as f:
-                        f.write(f"llm: attempt {attempt+1} empty content: {str(data)[:100]}\n")
+
         except asyncio.TimeoutError:
-            with open(__log_path, "a") as f:
-                f.write(f"llm: attempt {attempt+1} timeout\n")
+
         except Exception as e:
-            with open(__log_path, "a") as f:
-                f.write(f"llm: attempt {attempt+1} {type(e).__name__}: {str(e)[:100]}\n")
+
             import traceback
             traceback.print_exc()
         if attempt < 2:
@@ -690,8 +687,7 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
     Pauses between batches if pause_check() returns True.
     progress: optional mutable list [tagged_so_far, total] for live spinner updates.
     """
-    with open(__log_path, "a") as _f:
-        _f.write(f"tag_pipeline STARTED at {datetime.now()}\n")
+
     if not db.conn: db.connect()
     cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]'  ORDER BY RANDOM()")
     untagged = [db._parse_row(r) for r in cur.fetchall()]
@@ -710,7 +706,10 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
     sys_msg = {"role": "system", "content": "You are crüx. Classify each sample by BPM, spectral centroid (bright/dark), and filename. Genres: techno (130-150bpm, dark), house (120-130bpm, warm), drum-and-bass (160-180bpm), hip-hop (80-100bpm), trap (130-160bpm), ambient (60-90bpm), breakbeat, electro, dub, pop, rock, jazz, funk, soul, garage, dubstep, idm, bass, downtempo, lo-fi. Return ONLY valid JSON."}
     
     tagged = 0
-    concurrency = 4  # Match local model slots (4)
+    # Auto-detect local vs cloud presets
+    _is_local = "localhost" in LMSTUDIO_URL or "127.0.0.1" in LMSTUDIO_URL
+    concurrency = 4 if _is_local else 8
+    timeout = 300 if _is_local else 60
     sem = asyncio.Semaphore(concurrency)
     
 
@@ -748,42 +747,15 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
                     if attempt < 2:
                         await asyncio.sleep(2)
                 if not resp:
-                    with open(__log_path, "a") as __f:
-                        __f.write(f"MAIN LLM FAILED for batch of {len(batch)}, trying fallback\n")
-                    fallback_count = 0
-                    for fb_sample in batch:
-                        fb_msg = {"role": "user", "content": f"Tag this 1 sample.\n\n{{\"samples\": [{{\"id\": \"{fb_sample['id']}\", \"tags\": [\"sample\"], \"genres\": [\"house\"]}}]}}\n\n{fb_sample['id']}: {fb_sample['name']}"}
-                        for attempt in range(2):
-                            fb_resp = await llm_chat([sys_msg, fb_msg], temperature=0.2, max_tokens=200)
-                            if fb_resp:
-                                break
-                        if fb_resp:
-                            for entry in LLMAdapter.tag_response(fb_resp, [fb_sample]):
-                                if entry["id"]:
-                                    db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged")
-                                    fallback_count += 1
-                        else:
-                            with open(__log_path, "a") as __f:
-                                __f.write(f"  fallback failed for {fb_sample['name'][:20]}\n")
-                    with open(__log_path, "a") as __f:
-                        __f.write(f"fallback wrote {fallback_count}\n")
-                    return fallback_count
+                    return 0
                 
                 count = 0
-                parsed = LLMAdapter.tag_response(resp, batch)
-                with open(__log_path, "a") as f:
-                    f.write(f"resp={len(resp)}c parsed={len(parsed)} batch={len(batch)}\n")
-                for entry in parsed:
+                for entry in LLMAdapter.tag_response(resp, batch):
                     if entry["id"]:
-                        rc = db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged")
-                        if rc:
+                        if db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged"):
                             count += 1
-                with open(__log_path, "a") as f:
-                    f.write(f"written={count}/{len(parsed)} sid={entry['id'][:20] if entry['id'] else 'none'}\n")
                 return count
             except Exception as e:
-                with open(__log_path, "a") as f:
-                    f.write(f"ERROR: {type(e).__name__}: {e}\n")
                 import traceback
                 traceback.print_exc()
                 return 0
@@ -2230,8 +2202,6 @@ class CruxApp(App):
     @work(exclusive=True)
     async def run_tag(self):
         """Batch-tag all untagged samples via LLM. Pause/resume with Ctrl+T."""
-        with open(__log_path, "a") as _f:
-            _f.write(f"run_tag STARTED\n")
         self._tag_paused = False
         self._status_spinner = True
         
@@ -2432,8 +2402,6 @@ class CruxApp(App):
     
     def action_tag(self):
         """Toggle pause/resume tagging, or start if not running."""
-        with open(__log_path, "a") as _f:
-            _f.write(f"action_tag: paused={self._tag_paused} has_spinner={hasattr(self, '_spin_task')}\n")
         if self._tag_paused:
             self._tag_paused = False
             self.set_status("resuming tag...")
