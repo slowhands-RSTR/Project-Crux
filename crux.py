@@ -1220,14 +1220,18 @@ class CruxApp(App):
     #sample-list, #kit-grid, #import-log {{
         scrollbar-color: $dim;
         scrollbar-color-hover: $accent;
+        scrollbar-color-active: $accent;
         scrollbar-background: $border;
         scrollbar-background-hover: $border;
+        scrollbar-corner-color: $bg;
     }}
     ListView {{
         scrollbar-color: $dim;
         scrollbar-color-hover: $accent;
+        scrollbar-color-active: $accent;
         scrollbar-background: $border;
         scrollbar-background-hover: $border;
+        scrollbar-corner-color: $bg;
     }}
     """
     
