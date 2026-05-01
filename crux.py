@@ -1577,37 +1577,40 @@ class CruxApp(App):
         has_kit = any(s is not None for s in self._kit)
         
         # Explicit command keywords → LLM build
-        if first in ("build", "make", "create", "new"):
-            self.set_status(f"▶ LLM: {q}…")
-            self.run_llm(q)
-            return
-        
-        # Explicit refine commands → kit_refine (no word limit)
-        if first in ("refine", "swap", "change", "replace", "remix"):
-            if has_kit:
+        try:
+            if first in ("build", "make", "create", "new"):
+                self.set_status(f"▶ LLM: {q}…")
+                self.run_llm(q)
+                return
+            
+            if first in ("refine", "swap", "change", "replace", "remix"):
+                if has_kit:
+                    self.kit_refine(q)
+                else:
+                    self.set_status("build a kit first, then refine")
+                return
+            
+            if has_kit and first in ("darker", "heavier", "softer", "warmer", "brighter", "more", "less", "dub", "punchier", "cleaner", "looser", "tighter"):
                 self.kit_refine(q)
-            else:
-                self.set_status("build a kit first, then refine")
-            return
-        
-        # If we have a kit, treat ambiguous input as refine first
-        if has_kit and first in ("darker", "heavier", "softer", "warmer", "brighter", "more", "less", "dub", "punchier", "cleaner", "looser", "tighter"):
-            self.kit_refine(q)
-            return
-        
-        # Single genre word with a kit → build new kit
-        if first in ("techno", "house", "ambient", "lofi", "trap", "funk", "soul", "garage", "drill", "dnb", "jungle", "breakbeat", "electro", "hiphop", "jazz", "rock", "metal", "pop", "reggae", "dubstep", "drum", "bass"):
-            self.run_llm(q)
-            return
-        
-        # Has a kit with short input → try refine, fallback to search
-        if has_kit and len(q.split()) <= 3:
-            self.set_status(f"refining: {q}…")
-            self.kit_refine(q)
+                return
+            
+            if first in ("techno", "house", "ambient", "lofi", "trap", "funk", "soul", "garage", "drill", "dnb", "jungle", "breakbeat", "electro", "hiphop", "jazz", "rock", "metal", "pop", "reggae", "dubstep", "drum", "bass"):
+                self.run_llm(q)
+                return
+            
+            if has_kit and len(q.split()) <= 3:
+                self.set_status(f"refining: {q}…")
+                self.kit_refine(q)
+                return
+        except Exception as e:
+            self.set_status(f"LLM error: {str(e)[:50]}")
             return
         
         # Default: search
-        self.search(q)
+        try:
+            self.search(q)
+        except Exception as e:
+            self.set_status(f"search error: {str(e)[:50]}")
     
     # ─── LLM Commands ────────────────────────────────────────────────────────
     @work(exclusive=True)
