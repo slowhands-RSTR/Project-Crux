@@ -915,6 +915,9 @@ class SettingsScreen(Screen):
         except Exception as e:
             result.update(f"✗ {e}")
     
+    def action_save(self):
+        self._save()
+    
     def _save(self):
         llm = self.cfg.setdefault("llm", {})
         # Find which provider button is active
