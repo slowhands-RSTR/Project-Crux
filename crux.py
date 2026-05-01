@@ -222,35 +222,40 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
     url = override_url or LMSTUDIO_URL
     model = override_model or LMSTUDIO_MODEL
     api_key = override_key or LLM_API_KEY
-    try:
-        timeout = aiohttp.ClientTimeout(total=120)
-        headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        connector = aiohttp.TCPConnector(force_close=True)
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
-            async with session.post(url, json={
-                "model": model,
-                "messages": messages,
-                "stream": False,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }) as resp:
-                data = await resp.json()
-                msg = data["choices"][0]["message"]
-                # Some models (qwen with thinking mode) put output in reasoning_content
-                c = (msg.get("content") or "").strip()
-                if not c:
-                    c = (msg.get("reasoning_content") or "").strip()
+    
+    for attempt in range(3):
+        try:
+            timeout = aiohttp.ClientTimeout(total=120)
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            connector = aiohttp.TCPConnector(force_close=True)
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
+                async with session.post(url, json={
+                    "model": model,
+                    "messages": messages,
+                    "stream": False,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                }) as resp:
+                    data = await resp.json()
+                    msg = data["choices"][0]["message"]
+                    # Some models (qwen with thinking mode) put output in reasoning_content
+                    c = (msg.get("content") or "").strip()
+                    if not c:
+                        c = (msg.get("reasoning_content") or "").strip()
                 # Strip thinking boilerplate
                 if c.startswith("Thinking") and "\n\n" in c:
                     after = c.split("\n\n", 1)[-1].strip()
                     if after:
                         c = after
                 return c or None
-    except Exception as e:
-        print(f"[llm_chat] {e}", file=sys.stderr)
-        return None
+        except Exception as e:
+            print(f"[llm_chat] attempt {attempt+1}/3 failed: {e}", file=sys.stderr)
+            if attempt < 2:
+                await asyncio.sleep(2)
+            else:
+                return None
 def extract_json(text: str):
     m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
     if m:
