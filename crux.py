@@ -356,14 +356,16 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
         try:
             resp = await asyncio.to_thread(
                 _requests_post,
-                LMSTUDIO_URL, headers=headers, json=body, timeout=60,
+                LMSTUDIO_URL, headers=headers, json=body, timeout=120,
             )
             data = resp.json()
             c = LLMAdapter.extract_content(data)
             if c:
                 return c
         except Exception as e:
-            print(f"[llm] attempt {attempt+1}/3: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+            print(f"[llm] attempt {attempt+1}/3: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
         if attempt < 2:
             await asyncio.sleep(2)
     return None
