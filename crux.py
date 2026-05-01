@@ -1568,7 +1568,27 @@ class CruxApp(App):
                 self.set_status("select a sample first")
             return
         
-        # /prefix forces direct FTS5 search, bypasses LLM entirely
+        # /diagnose — check system health
+        if q.strip() == "/diagnose":
+            try:
+                stats = self.db.get_stats()
+                lines = [f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"]
+                lines.append(f"Samples: {stats['total']}  Tagged: {stats['tagged']}")
+                lines.append(f"LLM: {_config.get('llm',{}).get('provider','?')} @ {_config.get('llm',{}).get('model','?')}")
+                # Quick LLM check
+                proc = await asyncio.create_subprocess_exec(
+                    "curl", "-s", "--max-time", "5",
+                    _config.get("llm",{}).get("url", "http://localhost:1234/v1/chat/completions"),
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=6)
+                lines.append("LLM: OK" if b"choices" in out else "LLM: no response")
+                self.set_status(" | ".join(lines))
+            except Exception as e:
+                self.set_status(f"diagnose: {str(e)[:50]}")
+            return
+        
+        # / prefix forces direct FTS5 search, bypasses LLM entirely
         if q.startswith("/"):
             self.search(q[1:])
             return
@@ -2157,6 +2177,10 @@ class CruxApp(App):
                 self.set_status("tag paused")
             else:
                 self.set_status("no untapped samples")
+        except Exception as e:
+            self.set_status(f"tag error: {str(e)[:60]}")
+            import traceback
+            traceback.print_exc()
         finally:
             self._status_spinner = False
             if hasattr(self, '_spin_task'):
@@ -2164,16 +2188,21 @@ class CruxApp(App):
     
     @work
     async def run_import(self, path: str):
-        self.set_status(f"importing: {path}…")
-        self._import_path = None
-        results = await import_pipeline(path, self.db, app_ref=self)
-        if results:
-            self.set_status(f"✓ imported {results} samples")
-            self._stats = await self.db.get_stats()
-            self._update_header()
-            self.search("")
-        else:
-            self.set_status("import: no new samples found")
+        try:
+            self.set_status(f"importing: {path}…")
+            self._import_path = None
+            results = await import_pipeline(path, self.db, app_ref=self)
+            if results:
+                self.set_status(f"✓ imported {results} samples")
+                self._stats = await self.db.get_stats()
+                self._update_header()
+                self.search("")
+            else:
+                self.set_status("import: no new samples found")
+        except Exception as e:
+            self.set_status(f"import error: {str(e)[:60]}")
+            import traceback
+            traceback.print_exc()
     
     def on_status_msg(self, msg: StatusMsg) -> None:
         self.set_status(msg.text)
