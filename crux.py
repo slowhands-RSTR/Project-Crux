@@ -359,7 +359,7 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
     for attempt in range(3):
         try:
             connector = aiohttp.TCPConnector(force_close=True)
-            timeout_obj = aiohttp.ClientTimeout(total=120)
+            timeout_obj = aiohttp.ClientTimeout(total=300)
             async with aiohttp.ClientSession(timeout=timeout_obj, connector=connector) as session:
                 async with session.post(LMSTUDIO_URL, headers=headers, json=body) as resp:
                     data = await resp.json()
