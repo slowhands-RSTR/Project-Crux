@@ -22,7 +22,6 @@ if sys.version_info < (3, 10):
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
-from openai import OpenAI
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
@@ -226,30 +225,42 @@ class DB:
 # ─── LLM Helper ──────────────────────────────────────────────────────────────
 async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
                    json_mode=False, **kwargs) -> Optional[str]:
-    """Send messages to any OpenAI-compatible LLM.
-    Uses openai library with asyncio.to_thread for non-blocking I/O."""
-    base = LMSTUDIO_URL.rsplit("/v1/chat/completions", 1)[0].rsplit("/v1", 1)[0] + "/v1"
-    client = OpenAI(api_key=LLM_API_KEY or "not-needed", base_url=base, max_retries=3, timeout=30.0)
+    """Send messages to any OpenAI-compatible LLM via requests library."""
+    body = {
+        "model": LMSTUDIO_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
     
-    try:
-        resp = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.chat.completions.create,
-                model=LMSTUDIO_MODEL,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                response_format={"type": "json_object"} if json_mode else None,
-            ),
-            timeout=60,
-        )
-        c = (resp.choices[0].message.content or "").strip()
-        if not c:
-            c = (resp.choices[0].message.get("reasoning_content") or "").strip()
-        return c or None
-    except Exception as e:
-        print(f"[llm] {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
-        return None
+    headers = {"Content-Type": "application/json"}
+    if LLM_API_KEY:
+        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+    
+    for attempt in range(3):
+        try:
+            resp = await asyncio.to_thread(
+                _requests_post,
+                LMSTUDIO_URL, headers=headers, json=body, timeout=30,
+            )
+            data = resp.json()
+            c = (data["choices"][0]["message"].get("content") or "").strip()
+            if not c:
+                c = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
+            if c:
+                return c
+        except Exception as e:
+            print(f"[llm] attempt {attempt+1}/3: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+        if attempt < 2:
+            await asyncio.sleep(2)
+    return None
+
+def _requests_post(url, headers, json, timeout):
+    import requests as _r
+    return _r.post(url, headers=headers, json=json, timeout=timeout)
 def extract_json(text: str):
     m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
     if m:
@@ -901,13 +912,17 @@ class SettingsScreen(Screen):
     @work
     async def _do_test(self, url, model, key, result):
         try:
-            base = url.rsplit("/v1/chat/completions", 1)[0].rsplit("/v1", 1)[0] + "/v1"
-            c = OpenAI(api_key=key or "not-needed", base_url=base, max_retries=1, timeout=10.0)
+            import requests as _r
+            headers = {"Content-Type": "application/json"}
+            if key: headers["Authorization"] = f"Bearer {key}"
             resp = await asyncio.to_thread(
-                c.chat.completions.create,
-                model=model, messages=[{"role": "user", "content": "Say ok"}], max_tokens=5,
+                _r.post, url,
+                headers=headers,
+                json={"model": model, "messages": [{"role": "user", "content": "Say ok"}], "max_tokens": 5},
+                timeout=10,
             )
-            text = (resp.choices[0].message.content or "").strip()
+            data = resp.json()
+            text = (data["choices"][0]["message"].get("content") or "").strip()
             result.update(f"✓ {text[:50]}" if text else "✗ No response")
         except Exception as e:
             result.update(f"✗ {str(e)[:60]}")
