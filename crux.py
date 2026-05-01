@@ -1044,8 +1044,9 @@ class ExportScreen(Screen):
     .ehdr { color: #1a9e9e; text-style: bold; height: 2; }
     .elbl { color: #b8c8c8; height: 2; }
     Button {
+        width: 100%;
         background: #152a33; color: #b8c8c8;
-        border: solid #1a3a45; height: 3; min-width: 14;
+        border: solid #1a3a45; height: 3;
     }
     Button:hover { border: solid #1a9e9e; }
     Button.primary { background: #1a9e9e; color: #0b1a20; }
