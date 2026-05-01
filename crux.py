@@ -22,6 +22,7 @@ if sys.version_info < (3, 10):
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
+from openai import OpenAI
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
@@ -224,50 +225,28 @@ class DB:
 
 # ─── LLM Helper ──────────────────────────────────────────────────────────────
 async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
-                   override_url=None, override_model=None, override_key=None) -> Optional[str]:
-    """Call LLM via curl subprocess — avoids C extension segfaults on macOS Python 3.9."""
-    url = override_url or LMSTUDIO_URL
-    model = override_model or LMSTUDIO_MODEL
-    api_key = override_key or LLM_API_KEY
+                   json_mode=False, **kwargs) -> Optional[str]:
+    """Send messages to any OpenAI-compatible LLM.
+    Uses openai library with asyncio.to_thread for non-blocking I/O."""
+    base = LMSTUDIO_URL.rsplit("/v1/chat/completions", 1)[0].rsplit("/v1", 1)[0] + "/v1"
+    client = OpenAI(api_key=LLM_API_KEY or "not-needed", base_url=base, max_retries=3, timeout=30.0)
     
-    body = json.dumps({
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": False,
-    })
-    
-    for attempt in range(3):
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "--max-time", "60",
-                "-H", "Content-Type: application/json",
-                *(["-H", f"Authorization: Bearer {api_key}"] if api_key else []),
-                "-d", body,
-                url,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=65)
-            data = json.loads(stdout.decode())
-            c = (data["choices"][0]["message"].get("content") or "").strip()
-            if not c:
-                c = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
-            if c:
-                # Strip thinking boilerplate
-                if c.startswith("Thinking") and "\n\n" in c:
-                    after = c.split("\n\n", 1)[-1].strip()
-                    if after:
-                        c = after
-                return c
-        except asyncio.TimeoutError:
-            print(f"[llm] attempt {attempt+1}/3: timeout", file=sys.stderr)
-        except Exception as e:
-            print(f"[llm] attempt {attempt+1}/3: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
-        if attempt < 2:
-            await asyncio.sleep(2)
-    return None
+    try:
+        resp = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=LMSTUDIO_MODEL,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"} if json_mode else None,
+        )
+        c = (resp.choices[0].message.content or "").strip()
+        if not c:
+            c = (resp.choices[0].message.get("reasoning_content") or "").strip()
+        return c or None
+    except Exception as e:
+        print(f"[llm] {type(e).__name__}: {str(e)[:100]}", file=sys.stderr)
+        return None
 def extract_json(text: str):
     m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
     if m:
@@ -919,13 +898,16 @@ class SettingsScreen(Screen):
     @work
     async def _do_test(self, url, model, key, result):
         try:
-            resp = await llm_chat(
-                [{"role": "user", "content": "Say ok"}],
-                max_tokens=5, override_url=url, override_model=model, override_key=key,
+            base = url.rsplit("/v1/chat/completions", 1)[0].rsplit("/v1", 1)[0] + "/v1"
+            c = OpenAI(api_key=key or "not-needed", base_url=base, max_retries=1, timeout=10.0)
+            resp = await asyncio.to_thread(
+                c.chat.completions.create,
+                model=model, messages=[{"role": "user", "content": "Say ok"}], max_tokens=5,
             )
-            result.update(f"✓ {resp[:50]}" if resp else "✗ No response")
+            text = (resp.choices[0].message.content or "").strip()
+            result.update(f"✓ {text[:50]}" if text else "✗ No response")
         except Exception as e:
-            result.update(f"✗ {e}")
+            result.update(f"✗ {str(e)[:60]}")
     
     def action_save(self):
         self._save()
