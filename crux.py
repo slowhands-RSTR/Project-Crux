@@ -2230,6 +2230,8 @@ class CruxApp(App):
     @work(exclusive=True)
     async def run_tag(self):
         """Batch-tag all untagged samples via LLM. Pause/resume with Ctrl+T."""
+        with open(__log_path, "a") as _f:
+            _f.write(f"run_tag STARTED\n")
         self._tag_paused = False
         self._status_spinner = True
         
@@ -2430,6 +2432,8 @@ class CruxApp(App):
     
     def action_tag(self):
         """Toggle pause/resume tagging, or start if not running."""
+        with open(__log_path, "a") as _f:
+            _f.write(f"action_tag: paused={self._tag_paused} has_spinner={hasattr(self, '_spin_task')}\n")
         if self._tag_paused:
             self._tag_paused = False
             self.set_status("resuming tag...")
