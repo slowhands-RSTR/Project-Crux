@@ -707,7 +707,7 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
     tagged = 0
     # Auto-detect local vs cloud presets
     _is_local = "localhost" in LMSTUDIO_URL or "127.0.0.1" in LMSTUDIO_URL
-    concurrency = 4 if _is_local else 8
+    concurrency = 1 if _is_local else 8
     timeout = 300 if _is_local else 60
     sem = asyncio.Semaphore(concurrency)
     
