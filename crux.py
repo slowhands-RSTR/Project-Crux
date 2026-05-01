@@ -1747,7 +1747,8 @@ class CruxApp(App):
                 self._spin_task.cancel()
     
     async def _run_llm_impl(self, prompt: str) -> None:
-        self.set_status(f"LLM: {prompt}…")
+        try:
+            self.set_status(f"LLM: {prompt}…")
         
         # Strip command words + generic filler to get the real search intent
         stop_words = {"build", "make", "create", "new", "find", "search", "get", "give", "show",
@@ -1950,6 +1951,10 @@ class CruxApp(App):
         else:
             self.set_status(j.get("message", "ok"))
             self.search("")
+        except Exception as e:
+            self.set_status(f"LLM error: {str(e)[:60]}")
+            import traceback
+            traceback.print_exc()
     
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
@@ -2084,8 +2089,8 @@ class CruxApp(App):
     
     def kit_refine(self, direction: str):
         if not direction.strip(): return
-        
-        # Detect if user is targeting specific slot(s) by name
+        try:
+            # Detect if user is targeting specific slot(s) by name
         slot_name_map = {}
         for i, name in enumerate(SLOT_NAMES):
             slot_name_map[name.lower()] = i
@@ -2141,6 +2146,8 @@ class CruxApp(App):
         translated = " ".join(dir_map.get(w, w) for w in search_words)
         
         self.run_kit_refine(translated, target)
+        except Exception as e:
+            self.set_status(f"refine error: {str(e)[:60]}")
     
     @work(exclusive=True)
     async def run_kit_refine(self, direction: str, target_slots: list[int]):
