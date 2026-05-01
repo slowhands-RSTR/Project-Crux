@@ -819,6 +819,8 @@ class SettingsScreen(Screen):
         Binding("shift+tab", "focus_previous", "Previous", show=False, priority=True),
     ]
     
+    def action_focus_next(self): self.screen.focus_next()
+    def action_focus_previous(self): self.screen.focus_previous()
     def action_close_settings(self):
         self.dismiss(None)
     
@@ -1091,6 +1093,8 @@ class ExportScreen(Screen):
         elif btn_id == "e-close":
             self.dismiss(None)
     
+    def action_focus_next(self): self.screen.focus_next()
+    def action_focus_previous(self): self.screen.focus_previous()
     def action_close(self):
         self.dismiss(None)
     
