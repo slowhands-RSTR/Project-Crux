@@ -1874,8 +1874,6 @@ class CruxApp(App):
             sample = self._samples[idx]
             name = sample.get("name", "?")
             path = sample.get("path", "")
-        if path and os.path.exists(path):
-            self._play_audio(path)
         if sample:
             self._last_selected_id = sample.get("id")
         self._show_waveform(path, name, sample=sample)
@@ -1891,6 +1889,9 @@ class CruxApp(App):
                 self._kit_index = idx
                 self.render_kit()
                 slot_name = SLOT_NAMES[idx] if idx < len(SLOT_NAMES) else f"Slot {idx+1}"
+                s = self._kit[idx]
+                if s and os.path.exists(s.get("path", "")):
+                    self._play_audio(s["path"])
                 self.set_status(f"→ targeting: {slot_name}  (Tab to browse, Enter to add)")
         elif lv.id == "sample-list":
             idx = lv.index
