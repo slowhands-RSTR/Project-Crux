@@ -1325,7 +1325,7 @@ class CruxApp(App):
                 id="header-bar",
             ),
             Container(
-                Input(placeholder="search · build · refine — one prompt to rule them all", id="prompt-input"),
+                Input(placeholder="search · build · refine", id="prompt-input"),
                 id="prompt-bar",
             ),
             Container(
