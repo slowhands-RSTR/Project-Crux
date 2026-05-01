@@ -363,8 +363,14 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
                     c = LLMAdapter.extract_content(data)
                     if c:
                         return c
+                    with open("/tmp/crux_debug.log", "a") as f:
+                        f.write(f"llm: attempt {attempt+1} empty content: {str(data)[:100]}\n")
+        except asyncio.TimeoutError:
+            with open("/tmp/crux_debug.log", "a") as f:
+                f.write(f"llm: attempt {attempt+1} timeout\n")
         except Exception as e:
-            print(f"[llm] attempt {attempt+1}/3: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
+            with open("/tmp/crux_debug.log", "a") as f:
+                f.write(f"llm: attempt {attempt+1} {type(e).__name__}: {str(e)[:100]}\n")
             import traceback
             traceback.print_exc()
         if attempt < 2:
