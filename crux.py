@@ -588,13 +588,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
     concurrency = 8
     sem = asyncio.Semaphore(concurrency)
     
-    # Single shared session for all workers — prevents connection pool fragmentation
-    _http_timeout = aiohttp.ClientTimeout(total=120, connect=15)
-    _http_connector = aiohttp.TCPConnector(force_close=True, limit=0, limit_per_host=0)
-    _http_headers = {"Content-Type": "application/json"}
-    if LLM_API_KEY:
-        _http_headers["Authorization"] = f"Bearer {LLM_API_KEY}"
-    _http_session = aiohttp.ClientSession(connector=_http_connector, timeout=_http_timeout, headers=_http_headers)
+
     
     async def _tag_batch(batch: list[dict]) -> int:
         nonlocal tagged
@@ -620,28 +614,13 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                 
                 user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- Field names MUST be: id, tags, genres, sonics, notes\n- Do NOT use: category, type, style, description, instrument\n- 'id' must be EXACTLY the ID from each line below — copy it verbatim\n- 'genres' REQUIRED (min 1). If unsure: [\"house\"]\n- Return EXACTLY {len(batch)} entries\n- Return ONLY JSON. No markdown.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"house\"], \"sonics\": [\"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
                 
+                resp = None
                 for attempt in range(3):
-                    try:
-                        async with _http_session.post(LMSTUDIO_URL, json={
-                            "model": LMSTUDIO_MODEL,
-                            "messages": [sys_msg, user_msg],
-                            "stream": False,
-                            "temperature": 0.2,
-                            "max_tokens": 1000,
-                        }) as hresp:
-                            data = await hresp.json()
-                            msg = data["choices"][0]["message"]
-                            resp = (msg.get("content") or "").strip()
-                            if not resp:
-                                resp = (msg.get("reasoning_content") or "").strip()
-                            if resp:
-                                break
-                    except Exception as e:
-                        print(f"[tag] attempt {attempt+1}/3: {e}", file=sys.stderr)
-                        if attempt < 2:
-                            await asyncio.sleep(2)
-                        else:
-                            resp = None
+                    resp = await llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=1000)
+                    if resp:
+                        break
+                    if attempt < 2:
+                        await asyncio.sleep(2)
                 if not resp:
                     return 0
                 
@@ -748,7 +727,6 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
         if app_ref:
             app_ref.post_message(StatusMsg(msg))
     
-    await _http_session.close()
     return tagged
 
 class StatusMsg(Message):
