@@ -754,16 +754,19 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
                 
                 count = 0
                 parsed = LLMAdapter.tag_response(resp, batch)
-                print(f"[debug] resp={len(resp)}c parsed={len(parsed)} batch={len(batch)}", file=sys.stderr)
+                with open("/tmp/crux_debug.log", "a") as f:
+                    f.write(f"resp={len(resp)}c parsed={len(parsed)} batch={len(batch)}\n")
                 for entry in parsed:
                     if entry["id"]:
                         rc = db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged")
                         if rc:
                             count += 1
-                print(f"[debug] written={count}/{len(parsed)}", file=sys.stderr)
+                with open("/tmp/crux_debug.log", "a") as f:
+                    f.write(f"written={count}/{len(parsed)} sid={entry['id'][:20] if entry['id'] else 'none'}\n")
                 return count
             except Exception as e:
-                print(f"[tag_batch] worker error: {e}", file=sys.stderr)
+                with open("/tmp/crux_debug.log", "a") as f:
+                    f.write(f"ERROR: {type(e).__name__}: {e}\n")
                 import traceback
                 traceback.print_exc()
                 return 0
