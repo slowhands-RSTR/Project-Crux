@@ -2,12 +2,77 @@
 
 A keyboard-first terminal UI for browsing, curating, and building sample kits with LLM-powered assistance.
 
+## Requirements
+
+- **Python 3.10+** (3.11+ recommended — avoids macOS segfaults)
+- **LM Studio**, **Ollama**, or an **OpenAI-compatible API key**
+
 ## Quick Start
 
 ```bash
-cd crux-tui
-python3 crux.py              # Launch the TUI
-python3 crux.py import ~/samples/  # Import + analyze a folder
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Launch
+python3.11 crux.py
+
+# 3. Configure LLM
+#    Ctrl+S → Set your provider (LM Studio / Ollama / OpenAI)
+#    Test the connection, then Save
+
+# 4. Import samples
+python3.11 crux.py import ~/samples/
+
+# 5. Tag everything
+#    Ctrl+T starts batch tagging with genre-aware AI
+```
+
+## Config
+
+Config auto-creates at `~/.crux/config.toml` on first launch.
+
+```toml
+[llm]
+provider = "lm_studio"           # lm_studio | ollama | openai | custom
+url = "http://localhost:1234/v1/chat/completions"
+model = "qwen/qwen3.5-9b"
+api_key = ""                       # Leave blank for local models
+
+[import]
+tag_batch_size = 20
+
+[ui]
+theme = "shark"                   # shark | amber | matrix | paper
+samples_per_page = 500
+kit_slots = 8
+auto_audition = true
+```
+
+## Quick Start
+
+```bash
+pip install -r requirements.txt
+python3.11 crux.py              # Launch TUI
+python3.11 crux.py import ~/samples/  # Import folder
+```
+
+## Keybindings
+
+```
+/            Jump to search input (from any pane)
+j/k / arrows Navigate lists
+Enter        Play sample / Target kit slot
+1-8          Send sample directly to slot 1-8
+Delete       Clear slot
+Space        Lock/unlock slot
+P            Play preview
+Tab          Cycle between browse list ↔ kit grid
+Ctrl+1-8     Preview kit slot audio (macOS may capture)
+Ctrl+S       Settings (open/save)
+Ctrl+E       Export kit
+Ctrl+T       Tag: start/pause/resume batch LLM tagging
+Tab          Settings/Export: cycle between fields
+Escape       Close settings/export / Clear search
 ```
 
 ## Keybindings
