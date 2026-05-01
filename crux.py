@@ -603,130 +603,124 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
         async with sem:
             try:
                 batch_text = ""
-            
-            user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- Field names MUST be: id, tags, genres, sonics, notes\n- Do NOT use: category, type, style, description, instrument\n- 'id' must be EXACTLY the ID from each line below — copy it verbatim\n- 'genres' REQUIRED (min 1). If unsure: [\"house\"]\n- Return EXACTLY {len(batch)} entries\n- Return ONLY JSON. No markdown.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"house\"], \"sonics\": [\"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
-            
-            # Use a shared HTTP session instead of creating one per call
-            async with aiohttp.ClientSession(connector=http_connector, timeout=http_timeout, headers=http_headers) as http_session:
-                for attempt in range(3):
-                    try:
-                        async with http_session.post(LMSTUDIO_URL, json={
-                            "model": LMSTUDIO_MODEL,
-                            "messages": [sys_msg, user_msg],
-                            "stream": False,
-                            "temperature": 0.2,
-                            "max_tokens": 1000,
-                        }) as hresp:
-                            data = await hresp.json()
-                            msg = data["choices"][0]["message"]
-                            resp = (msg.get("content") or "").strip()
-                            if not resp:
-                                resp = (msg.get("reasoning_content") or "").strip()
-                            if resp:
-                                break
-                    except Exception as e:
-                        print(f"[tag] attempt {attempt+1}/3: {e}", file=sys.stderr)
-                        if attempt < 2:
-                            await asyncio.sleep(2)
-                        else:
-                            resp = None
-            if not resp:
-                return 0
-            
-            count = 0
-            entries = []
-            
-            # Strip markdown code block wrappers (gemma loves adding ```json...```)
-            clean = resp.strip()
-            if clean.startswith("```"):
-                clean = clean.split("```")[1]
-                if clean.startswith("json"):
-                    clean = clean[4:]
-                clean = clean.strip()
-            
-            try:
-                j = json.loads(clean)
-                if isinstance(j, list):
-                    entries = j
-                else:
-                    entries = j.get("samples")
-                    if entries is None:
-                        entries = [j]
-            except json.JSONDecodeError:
-                pass
-            
-            # If full JSON parse failed, try to salvage individual sample objects
-            if not entries:
-                for sample_json in re.finditer(r'\{"id":\s*"[^"]+"[^}]+\}', clean, re.DOTALL):
-                    try:
-                        entry = json.loads(sample_json.group())
-                        if entry.get("id"):
-                            entries.append(entry)
-                    except json.JSONDecodeError:
-                        continue
-            
-            for idx, entry in enumerate(entries):
-                sid = entry.get("id", "")
-                if not sid and idx < len(batch):
-                    sid = batch[idx]["id"]
-                elif sid and idx < len(batch):
-                    if sid not in (b["id"] for b in batch):
+                for s in batch:
+                    feats = {
+                        "duration_ms": s.get("duration_ms", 0),
+                        "bpm": s.get("bpm"),
+                        "rms_db": s.get("rms_db"),
+                        "spectral_centroid_hz": s.get("spectral_centroid_hz"),
+                        "spectral_flatness": s.get("spectral_flatness"),
+                        "transient_score": s.get("transient_score"),
+                        "onset_confidence": s.get("onset_confidence"),
+                    }
+                    char = describe_audio(feats)
+                    folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
+                    batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
+                
+                user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- Field names MUST be: id, tags, genres, sonics, notes\n- Do NOT use: category, type, style, description, instrument\n- 'id' must be EXACTLY the ID from each line below — copy it verbatim\n- 'genres' REQUIRED (min 1). If unsure: [\"house\"]\n- Return EXACTLY {len(batch)} entries\n- Return ONLY JSON. No markdown.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"house\"], \"sonics\": [\"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
+                
+                async with aiohttp.ClientSession(connector=http_connector, timeout=http_timeout, headers=http_headers) as http_session:
+                    for attempt in range(3):
+                        try:
+                            async with http_session.post(LMSTUDIO_URL, json={
+                                "model": LMSTUDIO_MODEL,
+                                "messages": [sys_msg, user_msg],
+                                "stream": False,
+                                "temperature": 0.2,
+                                "max_tokens": 1000,
+                            }) as hresp:
+                                data = await hresp.json()
+                                msg = data["choices"][0]["message"]
+                                resp = (msg.get("content") or "").strip()
+                                if not resp:
+                                    resp = (msg.get("reasoning_content") or "").strip()
+                                if resp:
+                                    break
+                        except Exception as e:
+                            print(f"[tag] attempt {attempt+1}/3: {e}", file=sys.stderr)
+                            if attempt < 2:
+                                await asyncio.sleep(2)
+                            else:
+                                resp = None
+                if not resp:
+                    return 0
+                
+                count = 0
+                entries = []
+                
+                clean = resp.strip()
+                if clean.startswith("```"):
+                    clean = clean.split("```")[1]
+                    if clean.startswith("json"):
+                        clean = clean[4:]
+                    clean = clean.strip()
+                
+                try:
+                    j = json.loads(clean)
+                    if isinstance(j, list):
+                        entries = j
+                    else:
+                        entries = j.get("samples")
+                        if entries is None:
+                            entries = [j]
+                except json.JSONDecodeError:
+                    pass
+                
+                if not entries:
+                    for m in re.finditer(r'\{"id":\s*"[^"]+"[^}]+\}', clean, re.DOTALL):
+                        try:
+                            entry = json.loads(m.group())
+                            if entry.get("id"):
+                                entries.append(entry)
+                        except json.JSONDecodeError:
+                            continue
+                
+                for idx, entry in enumerate(entries):
+                    sid = entry.get("id", "")
+                    if not sid and idx < len(batch):
                         sid = batch[idx]["id"]
-                
-                # Find tags: first list field (any key), or named fields
-                tags = entry.get("tags")
-                if not tags:
-                    for key in ("category", "type", "instrument", "class", "labels", "keywords"):
-                        val = entry.get(key)
-                        if isinstance(val, list):
-                            tags = val
-                            break
-                if not tags:
-                    # Fallback: any field that's a list of strings
-                    for key, val in entry.items():
-                        if isinstance(val, list) and val and isinstance(val[0], str):
-                            tags = val
-                            break
-                if not tags:
-                    tags = []
-                if isinstance(tags, str):
-                    tags = [tags]
-                
-                sonics = entry.get("sonics", [])
-                if sonics:
-                    for s_tag in sonics:
-                        if s_tag not in tags:
-                            tags.append(s_tag)
-                
-                # Find genres: list or string field
-                genres_raw = entry.get("genres") or entry.get("genre")
-                if not genres_raw:
-                    for key in ("style", "styles", "mood"):
-                        genres_raw = entry.get(key)
-                        if genres_raw:
-                            break
-                if isinstance(genres_raw, list):
-                    genre_str = ", ".join(g for g in genres_raw if g)
-                else:
-                    genre_str = str(genres_raw) if genres_raw else ""
-                
-                # Find notes: any string field that isn't id/tags/genres
-                notes = entry.get("notes") or entry.get("description") or ""
-                if not notes:
-                    for key, val in entry.items():
-                        if key not in ("id", "tags", "genres", "sonics", "genre") and isinstance(val, str) and len(val) > 10:
-                            notes = val
-                            break
-                notes = notes[:200]
-                if sid:
-                    if db.update_tags(sid, tags, genre=genre_str, notes=notes):
-                        count += 1
-            return count
-        except Exception as e:
-            print(f"[tag_batch] worker error: {e}", file=sys.stderr)
-            import traceback
-            traceback.print_exc()
-            return 0
+                    elif sid and idx < len(batch):
+                        if sid not in (b["id"] for b in batch):
+                            sid = batch[idx]["id"]
+                    
+                    tags = entry.get("tags")
+                    if not tags:
+                        for k in ("category", "type", "instrument", "class", "labels", "keywords"):
+                            v = entry.get(k)
+                            if isinstance(v, list): tags = v; break
+                    if not tags:
+                        for k, v in entry.items():
+                            if isinstance(v, list) and v and isinstance(v[0], str): tags = v; break
+                    if not tags: tags = []
+                    if isinstance(tags, str): tags = [tags]
+                    
+                    sonics = entry.get("sonics", [])
+                    if sonics:
+                        for s_tag in sonics:
+                            if s_tag not in tags: tags.append(s_tag)
+                    
+                    genres_raw = entry.get("genres") or entry.get("genre")
+                    if not genres_raw:
+                        for k in ("style", "styles", "mood"):
+                            genres_raw = entry.get(k)
+                            if genres_raw: break
+                    genre_str = ", ".join(g for g in genres_raw if g) if isinstance(genres_raw, list) else str(genres_raw) if genres_raw else ""
+                    
+                    notes = entry.get("notes") or entry.get("description") or ""
+                    if not notes:
+                        for k, v in entry.items():
+                            if k not in ("id", "tags", "genres", "sonics", "genre") and isinstance(v, str) and len(v) > 10:
+                                notes = v; break
+                    notes = notes[:200]
+                    if sid:
+                        if db.update_tags(sid, tags, genre=genre_str, notes=notes):
+                            count += 1
+                return count
+            except Exception as e:
+                print(f"[tag_batch] worker error: {e}", file=sys.stderr)
+                import traceback
+                traceback.print_exc()
+                return 0
     
     # Process batches concurrently with pause support
     batch_idx = 0
