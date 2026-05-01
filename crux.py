@@ -1747,8 +1747,7 @@ class CruxApp(App):
                 self._spin_task.cancel()
     
     async def _run_llm_impl(self, prompt: str) -> None:
-        try:
-            self.set_status(f"LLM: {prompt}…")
+        self.set_status(f"LLM: {prompt}…")
         
         # Strip command words + generic filler to get the real search intent
         stop_words = {"build", "make", "create", "new", "find", "search", "get", "give", "show",
@@ -1951,10 +1950,6 @@ class CruxApp(App):
         else:
             self.set_status(j.get("message", "ok"))
             self.search("")
-        except Exception as e:
-            self.set_status(f"LLM error: {str(e)[:60]}")
-            import traceback
-            traceback.print_exc()
     
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
