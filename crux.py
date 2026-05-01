@@ -233,9 +233,6 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
         "max_tokens": max_tokens,
         "stream": False,
     }
-    if json_mode:
-        body["response_format"] = {"type": "json_object"}
-    
     headers = {"Content-Type": "application/json"}
     if LLM_API_KEY:
         headers["Authorization"] = f"Bearer {LLM_API_KEY}"
