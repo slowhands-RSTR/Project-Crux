@@ -376,6 +376,8 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
             pass
         except Exception as e:
             print(f"[llm] {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
             traceback.print_exc()
         if attempt < 2:
             await asyncio.sleep(2)
