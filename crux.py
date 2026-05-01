@@ -11,6 +11,13 @@ Usage:
   ./crux.py import ~/samples/   # import & analyze + LLM-tag a folder
 """
 
+# Python version check — 3.9 segfaults on macOS with async HTTP
+if sys.version_info < (3, 10):
+    print("crüx requires Python 3.10+", file=sys.stderr)
+    print(f"You have Python {sys.version_info.major}.{sys.version_info.minor}", file=sys.stderr)
+    print("Install a newer Python from python.org or your package manager", file=sys.stderr)
+    sys.exit(1)
+
 import sys, os, sqlite3, re, json, subprocess, time, asyncio, uuid, concurrent.futures
 from pathlib import Path
 from datetime import datetime
