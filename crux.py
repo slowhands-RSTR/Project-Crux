@@ -813,9 +813,8 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
         if app_ref:
             app_ref.post_message(StatusMsg(msg))
     
-    # Clear tagging override so subsequent calls use main llm config
-    global _tag_override
-    _tag_override = {}
+    # Clear tagging override
+    del _tag_override
     return tagged
 
 class StatusMsg(Message):
