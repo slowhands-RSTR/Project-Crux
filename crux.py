@@ -48,7 +48,7 @@ def load_config():
             "api_key": "",
         },
         "import": {"recursive": True, "analyze_bpm": True, "analyze_key": False, "audio_formats": ["wav","mp3","aiff","aif","flac","ogg","m4a"], "tag_batch_size": 3},
-        "ui": {"theme": "default", "samples_per_page": 500, "kit_slots": 8},
+        "ui": {"theme": "default", "samples_per_page": 500, "kit_slots": 8, "auto_audition": True},
     }
     # Parse config.toml manually (Python 3.9 doesn't have tomllib)
     try:
@@ -806,6 +806,12 @@ class SettingsScreen(Screen):
                 value=self._normalize_theme(self.cfg.get("ui",{}).get("theme","shark")),
                 id="s-theme",
             ),
+            Static("Auto-audition on arrow keys", classes="slbl"),
+            Select(
+                [("On", True), ("Off", False)],
+                value=self.cfg.get("ui",{}).get("auto_audition", True),
+                id="s-audition",
+            ),
             Static("", id="s-result"),
             Horizontal(
                 Button("Test", id="s-test"),
@@ -939,6 +945,8 @@ class SettingsScreen(Screen):
         self.cfg.setdefault("general", {})["library_path"] = self.query_one("#s-lib", Input).value.strip()
         raw_theme = self.query_one("#s-theme", Select).value
         self.cfg.setdefault("ui", {})["theme"] = self._normalize_theme(raw_theme)
+        audition = self.query_one("#s-audition", Select).value
+        self.cfg.setdefault("ui", {})["auto_audition"] = audition
         save_config(self.cfg)
         self.dismiss(True)
 
@@ -1876,6 +1884,8 @@ class CruxApp(App):
             path = sample.get("path", "")
         if sample:
             self._last_selected_id = sample.get("id")
+            if path and os.path.exists(path) and _config.get("ui",{}).get("auto_audition", True):
+                self._play_audio(path)
         self._show_waveform(path, name, sample=sample)
         self.set_status(f"▶ {name}")
     
@@ -1897,15 +1907,10 @@ class CruxApp(App):
             idx = lv.index
             if idx is not None and 0 <= idx < len(self._samples):
                 s = self._samples[idx]
-                slot_name = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
-                if self._kit_locked[self._kit_index]:
-                    self.set_status(f"{slot_name} is locked — unlock with space first")
-                    return
-                self._kit[self._kit_index] = s
-                self._advance_kit_slot()
-                self.render_kit()
-                next_slot = SLOT_NAMES[self._kit_index] if self._kit_index < len(SLOT_NAMES) else f"Slot {self._kit_index+1}"
-                self.set_status(f"{s['name']} → {slot_name}  |  next: {next_slot}")
+                path = s.get("path", "")
+                if path and os.path.exists(path):
+                    self._play_audio(path)
+                self.set_status(f"▶ {s.get('name','?')}")
     
     def _play_audio(self, path: str):
         """Play audio, killing any previous playback to prevent bleed."""
