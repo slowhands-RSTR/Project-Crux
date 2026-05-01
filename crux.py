@@ -85,7 +85,7 @@ def load_config():
                 elif v.startswith("[") and v.endswith("]"):
                     v = [x.strip().strip('"').strip("'") for x in v[1:-1].split(",")]
                 cfg[section][k] = v
-    except:
+    except Exception:
         pass
     return cfg
 
@@ -602,7 +602,7 @@ def render_waveform_ascii(path: str, width: int = 50, height: int = 3) -> str:
                     line += " "
             lines.append(line)
         return "\n".join(lines)
-    except:
+    except Exception:
         return ""
 
 # ─── Import Pipeline ─────────────────────────────────────────────────────────
