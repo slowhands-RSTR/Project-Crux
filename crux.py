@@ -730,7 +730,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                     batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
                 
                 _fmt = '{"samples": [{"id": "...", "tags": ["kick"], "genres": ["techno"], "notes": "..."}]}'
-            user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\nRULES: genres from spectral data (BPM, centroid), not defaults.\nReturn EXACTLY {len(batch)} entries. ONLY raw JSON.\n\nFormat: {_fmt}\n\nSamples:\n{batch_text}"}]}
+                user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\nRULES: genres from spectral data (BPM, centroid), not defaults.\nReturn EXACTLY {len(batch)} entries. ONLY raw JSON.\n\nFormat: {_fmt}\n\nSamples:\n{batch_text}"}
                 
                 resp = None
                 for attempt in range(3):
