@@ -343,25 +343,30 @@ class DB:
 async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
                    json_mode=False, **kwargs) -> Optional[str]:
     """Send messages to any OpenAI-compatible LLM via requests library."""
+    # Use tagging override if set (from tag_pipeline), else main llm config
+    _u = getattr(__import__('builtins'), '_tag_override', {}).get('url') or LMSTUDIO_URL
+    _m = getattr(__import__('builtins'), '_tag_override', {}).get('model') or LMSTUDIO_MODEL
+    _k = getattr(__import__('builtins'), '_tag_override', {}).get('key') or LLM_API_KEY
+    
     body = {
-        "model": LMSTUDIO_MODEL,
+        "model": _m,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": False,
     }
     headers = {"Content-Type": "application/json"}
-    if LLM_API_KEY:
-        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+    if _k:
+        headers["Authorization"] = f"Bearer {_k}"
     
     import aiohttp
     for attempt in range(3):
         try:
             connector = aiohttp.TCPConnector(force_close=True)
-            _to = 300 if "localhost" in LMSTUDIO_URL or "127.0.0.1" in LMSTUDIO_URL else 60
+            _to = 300 if "localhost" in _u or "127.0.0.1" in _u else 60
             timeout_obj = aiohttp.ClientTimeout(total=_to)
             async with aiohttp.ClientSession(timeout=timeout_obj, connector=connector) as session:
-                async with session.post(LMSTUDIO_URL, headers=headers, json=body) as resp:
+                async with session.post(_u, headers=headers, json=body) as resp:
                     data = await resp.json()
                     c = LLMAdapter.extract_content(data)
                     if c:
@@ -688,6 +693,13 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
     """
 
     if not db.conn: db.connect()
+    # Use tagging-specific model if configured, fall back to main llm
+    _tag_cfg = _config.get("tagging", {})
+    _tag_url = _tag_cfg.get("url") or LMSTUDIO_URL
+    _tag_model = _tag_cfg.get("model") or LMSTUDIO_MODEL
+    _tag_key = _tag_cfg.get("api_key") or LLM_API_KEY
+    global _tag_override
+    _tag_override = {"url": _tag_url, "model": _tag_model, "key": _tag_key}
     cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]'  ORDER BY RANDOM()")
     untagged = [db._parse_row(r) for r in cur.fetchall()]
     total = len(untagged)
@@ -801,6 +813,9 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
         if app_ref:
             app_ref.post_message(StatusMsg(msg))
     
+    # Clear tagging override so subsequent calls use main llm config
+    global _tag_override
+    _tag_override = {}
     return tagged
 
 class StatusMsg(Message):
