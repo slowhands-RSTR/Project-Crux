@@ -623,25 +623,25 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                 for attempt in range(3):
                     try:
                         async with _http_session.post(LMSTUDIO_URL, json={
-                                "model": LMSTUDIO_MODEL,
-                                "messages": [sys_msg, user_msg],
-                                "stream": False,
-                                "temperature": 0.2,
-                                "max_tokens": 1000,
-                            }) as hresp:
-                                data = await hresp.json()
-                                msg = data["choices"][0]["message"]
-                                resp = (msg.get("content") or "").strip()
-                                if not resp:
-                                    resp = (msg.get("reasoning_content") or "").strip()
-                                if resp:
-                                    break
-                        except Exception as e:
-                            print(f"[tag] attempt {attempt+1}/3: {e}", file=sys.stderr)
-                            if attempt < 2:
-                                await asyncio.sleep(2)
-                            else:
-                                resp = None
+                            "model": LMSTUDIO_MODEL,
+                            "messages": [sys_msg, user_msg],
+                            "stream": False,
+                            "temperature": 0.2,
+                            "max_tokens": 1000,
+                        }) as hresp:
+                            data = await hresp.json()
+                            msg = data["choices"][0]["message"]
+                            resp = (msg.get("content") or "").strip()
+                            if not resp:
+                                resp = (msg.get("reasoning_content") or "").strip()
+                            if resp:
+                                break
+                    except Exception as e:
+                        print(f"[tag] attempt {attempt+1}/3: {e}", file=sys.stderr)
+                        if attempt < 2:
+                            await asyncio.sleep(2)
+                        else:
+                            resp = None
                 if not resp:
                     return 0
                 
