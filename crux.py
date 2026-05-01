@@ -126,6 +126,121 @@ SLOT_NAMES = ["Kick","Snare","Clap","Perc","Tom","Hat","Ride","Crash",
 KIT_SLOTS = _config["ui"]["kit_slots"]
 PAGE_SIZE = _config["ui"]["samples_per_page"]
 
+# ─── LLM Adapter ─────────────────────────────────────────────────────────────
+class LLMAdapter:
+    """Normalizes any LLM response into a standard format.
+    
+    Handles:
+    - content vs reasoning_content (thinking mode)
+    - Markdown-wrapped JSON
+    - Truncated JSON with regex salvage
+    - Field name variations (category/tags, style/genres, description/notes)
+    - ID matching by position
+    """
+    
+    @staticmethod
+    def extract_content(data: dict) -> str:
+        """Get the actual response text from any OpenAI-compatible response."""
+        msg = data["choices"][0]["message"]
+        text = (msg.get("content") or msg.get("reasoning_content") or "").strip()
+        # Strip thinking boilerplate (Qwen thinking mode)
+        if text.startswith("Thinking") and "\n\n" in text:
+            after = text.split("\n\n", 1)[-1].strip()
+            if after:
+                text = after
+        return text
+    
+    @staticmethod
+    def strip_markdown(text: str) -> str:
+        """Remove markdown code block wrappers."""
+        text = text.strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            if len(parts) >= 2:
+                text = parts[1]
+                if text.startswith("json"):
+                    text = text[4:]
+                text = text.strip()
+        return text
+    
+    @staticmethod
+    def parse_json(text: str) -> list[dict]:
+        """Parse LLM response into list of sample entries.
+        Handles full JSON, truncated JSON, arrays, and objects."""
+        clean = LLMAdapter.strip_markdown(text)
+        entries = []
+        try:
+            j = json.loads(clean)
+            if isinstance(j, list):
+                entries = j
+            else:
+                entries = j.get("samples") or [j]
+        except json.JSONDecodeError:
+            pass
+        # Regex salvage if full parse failed
+        if not entries:
+            for m in re.finditer(r'\{"id":\s*"[^"]+"[^}]+\}', clean, re.DOTALL):
+                try:
+                    e = json.loads(m.group())
+                    if e.get("id"):
+                        entries.append(e)
+                except json.JSONDecodeError:
+                    continue
+        return entries
+    
+    @staticmethod
+    def normalize_entry(entry: dict, batch: list[dict], idx: int) -> dict:
+        """Normalize field names and match ID by position."""
+        # ID: use LLM's id if it matches batch, otherwise position-based
+        sid = entry.get("id", "")
+        if idx < len(batch):
+            if not sid or sid not in (b["id"] for b in batch):
+                sid = batch[idx]["id"]
+        
+        # Tags: any list field (tags, category, type, instrument, class)
+        tags = entry.get("tags")
+        if not tags:
+            for k in ("category", "type", "instrument", "class", "labels", "keywords"):
+                v = entry.get(k)
+                if isinstance(v, list):
+                    tags = v
+                    break
+        if not tags:
+            for k, v in entry.items():
+                if isinstance(v, list) and v and isinstance(v[0], str):
+                    tags = v
+                    break
+        if not tags:
+            tags = []
+        if isinstance(tags, str):
+            tags = [tags]
+        
+        # Genres: list or string (genres, genre, style, styles, mood)
+        gr = entry.get("genres") or entry.get("genre")
+        if not gr:
+            for k in ("style", "styles", "mood"):
+                gr = entry.get(k)
+                if gr:
+                    break
+        genre_str = ", ".join(g for g in gr if g) if isinstance(gr, list) else str(gr) if gr else ""
+        
+        # Notes: any long string field (notes, description)
+        notes = entry.get("notes") or entry.get("description") or ""
+        if not notes:
+            for k, v in entry.items():
+                if k not in ("id", "tags", "genres", "sonics", "genre") and isinstance(v, str) and len(v) > 10:
+                    notes = v
+                    break
+        notes = notes[:200]
+        
+        return {"id": sid, "tags": tags, "genre": genre_str, "notes": notes}
+    
+    @staticmethod
+    def tag_response(text: str, batch: list[dict]) -> list[dict]:
+        """Full pipeline: parse + normalize LLM tag response."""
+        entries = LLMAdapter.parse_json(text)
+        return [LLMAdapter.normalize_entry(e, batch, i) for i, e in enumerate(entries)]
+
 # ─── DB Helpers ──────────────────────────────────────────────────────────────
 class DB:
     def __init__(self, path=None):
@@ -244,9 +359,7 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
                 LMSTUDIO_URL, headers=headers, json=body, timeout=30,
             )
             data = resp.json()
-            c = (data["choices"][0]["message"].get("content") or "").strip()
-            if not c:
-                c = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
+            c = LLMAdapter.extract_content(data)
             if c:
                 return c
         except Exception as e:
@@ -633,90 +746,16 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                             if fb_resp:
                                 break
                         if fb_resp:
-                            try:
-                                fj = json.loads(fb_resp)
-                                fe = fj.get("samples") or [fj]
-                                for e in fe:
-                                    sid = e.get("id", fb_sample["id"])
-                                    t = e.get("tags") or ["sample"]
-                                    gr = e.get("genres") or e.get("genre", "")
-                                    gs = ", ".join(g for g in gr if g) if isinstance(gr, list) else str(gr) if gr else "house"
-                                    n = (e.get("notes") or "")[:200]
-                                    db.update_tags(sid, t, genre=gs, notes=n or "tagged")
+                            for entry in LLMAdapter.tag_response(fb_resp, [fb_sample]):
+                                if entry["id"]:
+                                    db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged")
                                     fallback_count += 1
-                            except:
-                                pass
                     return fallback_count
                 
                 count = 0
-                entries = []
-                
-                clean = resp.strip()
-                if clean.startswith("```"):
-                    clean = clean.split("```")[1]
-                    if clean.startswith("json"):
-                        clean = clean[4:]
-                    clean = clean.strip()
-                
-                try:
-                    j = json.loads(clean)
-                    if isinstance(j, list):
-                        entries = j
-                    else:
-                        entries = j.get("samples")
-                        if entries is None:
-                            entries = [j]
-                except json.JSONDecodeError:
-                    pass
-                
-                if not entries:
-                    for m in re.finditer(r'\{"id":\s*"[^"]+"[^}]+\}', clean, re.DOTALL):
-                        try:
-                            entry = json.loads(m.group())
-                            if entry.get("id"):
-                                entries.append(entry)
-                        except json.JSONDecodeError:
-                            continue
-                
-                for idx, entry in enumerate(entries):
-                    sid = entry.get("id", "")
-                    if not sid and idx < len(batch):
-                        sid = batch[idx]["id"]
-                    elif sid and idx < len(batch):
-                        if sid not in (b["id"] for b in batch):
-                            sid = batch[idx]["id"]
-                    
-                    tags = entry.get("tags")
-                    if not tags:
-                        for k in ("category", "type", "instrument", "class", "labels", "keywords"):
-                            v = entry.get(k)
-                            if isinstance(v, list): tags = v; break
-                    if not tags:
-                        for k, v in entry.items():
-                            if isinstance(v, list) and v and isinstance(v[0], str): tags = v; break
-                    if not tags: tags = []
-                    if isinstance(tags, str): tags = [tags]
-                    
-                    sonics = entry.get("sonics", [])
-                    if sonics:
-                        for s_tag in sonics:
-                            if s_tag not in tags: tags.append(s_tag)
-                    
-                    genres_raw = entry.get("genres") or entry.get("genre")
-                    if not genres_raw:
-                        for k in ("style", "styles", "mood"):
-                            genres_raw = entry.get(k)
-                            if genres_raw: break
-                    genre_str = ", ".join(g for g in genres_raw if g) if isinstance(genres_raw, list) else str(genres_raw) if genres_raw else ""
-                    
-                    notes = entry.get("notes") or entry.get("description") or ""
-                    if not notes:
-                        for k, v in entry.items():
-                            if k not in ("id", "tags", "genres", "sonics", "genre") and isinstance(v, str) and len(v) > 10:
-                                notes = v; break
-                    notes = notes[:200]
-                    if sid:
-                        if db.update_tags(sid, tags, genre=genre_str, notes=notes):
+                for entry in LLMAdapter.tag_response(resp, batch):
+                    if entry["id"]:
+                        if db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged"):
                             count += 1
                 return count
             except Exception as e:
