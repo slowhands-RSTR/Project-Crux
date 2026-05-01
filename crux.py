@@ -1867,19 +1867,23 @@ class CruxApp(App):
             self.set_status(f"LLM: {resp[:80]}…")
             return
         
-        action = j.get("action", "message")
+        action = j.get("action", "")
+        # Flexible slot extraction: try multiple formats
+        slots = []
+        if j.get("slots"):
+            slots = j["slots"]  # Standard format: {action:"kit", slots:[{slot:0, sampleId:"id"}]}
+        elif j.get("samples"):
+            # LFM2 etc return {samples: {kick: [files], snare: [files]}}
+            pass  # Can't build structured kit from free text
+        if not slots:
+            ids = j.get("ids", [])
+            if len(ids) >= 2:
+                slots = [{"slot": i, "sampleId": sid} for i, sid in enumerate(ids)]
+        
         if action == "search":
             self.search(j.get("query", prompt))
             self.set_status(f"searched: {j.get('query','')}")
-        elif action == "kit":
-            slots = j.get("slots", [])
-            if not slots:
-                # Fallback: old format with just ids
-                ids = j.get("ids", [])
-                if len(ids) < 2:
-                    self.set_status(f"LLM: not enough samples")
-                    return
-                slots = [{"slot": i, "sampleId": sid} for i, sid in enumerate(ids)]
+        elif action == "kit" or slots:
             name = j.get("name", f"kit-{int(time.time())}")
             self._kit = [None] * KIT_SLOTS
             # Save locked slots — don't wipe them
