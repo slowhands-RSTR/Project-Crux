@@ -699,7 +699,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
     # Chunk into batches
     batches = [untagged[i:i + batch_size] for i in range(0, total, batch_size)]
     
-    sys_msg = {"role": "system", "content": "You are crüx. Tags describe the sample. Genres REQUIRED (min 1, default ['house']). Return EXACTLY {len(batch)} entries. ONLY raw JSON — no markdown."}
+    sys_msg = {"role": "system", "content": "You are crüx. Classify each sample by BPM, spectral centroid (bright/dark), and filename. Genres: techno (130-150bpm, dark), house (120-130bpm, warm), drum-and-bass (160-180bpm), hip-hop (80-100bpm), trap (130-160bpm), ambient (60-90bpm), breakbeat, electro, dub, pop, rock, jazz, funk, soul, garage, dubstep, idm, bass, downtempo, lo-fi. Return ONLY valid JSON."}
     
     tagged = 0
     concurrency = 8
@@ -729,7 +729,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                     folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
                     batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
                 
-                user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- Field names MUST be: id, tags, genres, sonics, notes\n- Do NOT use: category, type, style, description, instrument\n- 'id' must be EXACTLY the ID from each line below — copy it verbatim\n- 'genres' REQUIRED (min 1). If unsure: [\"house\"]\n- Return EXACTLY {len(batch)} entries\n- Return ONLY JSON. No markdown.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"house\"], \"sonics\": [\"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
+                user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- 'genres' MUST describe the ACTUAL genre from spectral data, not a default\n- Use BPM: <100bpm=hip-hop/ambient, 120-130=house, 130-150=techno, 160+=dnb\n- Use centroid: bright=house/pop, dark=techno/ambient, mid=hip-hop\n- Return EXACTLY {len(batch)} entries\n- Return ONLY JSON.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\",\"808\"], \"genres\": [\"techno\"], \"notes\": \"...\"}}]}}\n\nSamples:\n{batch_text}"}]}
                 
                 resp = None
                 for attempt in range(3):
