@@ -809,7 +809,7 @@ class SettingsScreen(Screen):
             Static("Auto-audition on arrow keys", classes="slbl"),
             Select(
                 [("On", True), ("Off", False)],
-                value=self.cfg.get("ui",{}).get("auto_audition", True),
+                value=True if self.cfg.get("ui",{}).get("auto_audition", True) == True else False,
                 id="s-audition",
             ),
             Static("", id="s-result"),
