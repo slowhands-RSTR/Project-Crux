@@ -1081,7 +1081,7 @@ class CruxApp(App):
     }}
     #prompt-bar {{
         height: 3;
-        background: $surface;
+        background: $bg;
         padding: 0 1;
     }}
     #prompt-input {{
@@ -1105,15 +1105,14 @@ class CruxApp(App):
         height: 100%;
     }}
     #waveform-bar {{
-        height: 4;
+        height: 1;
         width: 100%;
         background: $bg;
-        border-bottom: solid $border;
     }}
     #waveform-view {{
         height: 100%;
         padding: 0 1;
-        color: $accent;
+        color: $bg;
         overflow: hidden;
     }}
     #sample-list {{
