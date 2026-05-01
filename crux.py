@@ -570,7 +570,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
     progress: optional mutable list [tagged_so_far, total] for live spinner updates.
     """
     if not db.conn: db.connect()
-    cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]' OR ai_notes IS NULL OR ai_notes = '' ORDER BY RANDOM()")
+    cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]'  ORDER BY RANDOM()")
     untagged = [db._parse_row(r) for r in cur.fetchall()]
     total = len(untagged)
     if total == 0:
@@ -624,7 +624,29 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                     if attempt < 2:
                         await asyncio.sleep(2)
                 if not resp:
-                    return 0
+                    # Fallback: try each sample individually
+                    fallback_count = 0
+                    for fb_sample in batch:
+                        fb_msg = {"role": "user", "content": f"Tag this 1 sample.\n\n{{\"samples\": [{{\"id\": \"{fb_sample['id']}\", \"tags\": [\"sample\"], \"genres\": [\"house\"]}}]}}\n\n{fb_sample['id']}: {fb_sample['name']}"}
+                        for attempt in range(2):
+                            fb_resp = await llm_chat([sys_msg, fb_msg], temperature=0.2, max_tokens=200)
+                            if fb_resp:
+                                break
+                        if fb_resp:
+                            try:
+                                fj = json.loads(fb_resp)
+                                fe = fj.get("samples") or [fj]
+                                for e in fe:
+                                    sid = e.get("id", fb_sample["id"])
+                                    t = e.get("tags") or ["sample"]
+                                    gr = e.get("genres") or e.get("genre", "")
+                                    gs = ", ".join(g for g in gr if g) if isinstance(gr, list) else str(gr) if gr else "house"
+                                    n = (e.get("notes") or "")[:200]
+                                    db.update_tags(sid, t, genre=gs, notes=n or "tagged")
+                                    fallback_count += 1
+                            except:
+                                pass
+                    return fallback_count
                 
                 count = 0
                 entries = []
@@ -709,7 +731,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
         if pause_check and pause_check():
             while pause_check():
                 await asyncio.sleep(0.5)
-            cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]' OR ai_notes IS NULL OR ai_notes = '' ORDER BY RANDOM()")
+            cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]'  ORDER BY RANDOM()")
             remaining = [db._parse_row(r) for r in cur.fetchall()]
             batches = [remaining[i:i + batch_size] for i in range(0, len(remaining), batch_size)]
             batch_idx = 0
