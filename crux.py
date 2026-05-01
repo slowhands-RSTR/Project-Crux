@@ -756,10 +756,14 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                     return fallback_count
                 
                 count = 0
-                for entry in LLMAdapter.tag_response(resp, batch):
+                parsed = LLMAdapter.tag_response(resp, batch)
+                print(f"[debug] resp={len(resp)}c parsed={len(parsed)} batch={len(batch)}", file=sys.stderr)
+                for entry in parsed:
                     if entry["id"]:
-                        if db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged"):
+                        rc = db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged")
+                        if rc:
                             count += 1
+                print(f"[debug] written={count}/{len(parsed)}", file=sys.stderr)
                 return count
             except Exception as e:
                 print(f"[tag_batch] worker error: {e}", file=sys.stderr)
