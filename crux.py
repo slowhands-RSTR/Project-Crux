@@ -809,7 +809,7 @@ class SettingsScreen(Screen):
             Static("Auto-audition on arrow keys", classes="slbl"),
             Select(
                 [("On", True), ("Off", False)],
-                value=True if self.cfg.get("ui",{}).get("auto_audition", True) == True else False,
+                value=self.cfg.get("ui",{}).get("auto_audition", True) if self.cfg.get("ui",{}).get("auto_audition") in (True, False) else True,
                 id="s-audition",
             ),
             Static("", id="s-result"),
@@ -949,7 +949,8 @@ class SettingsScreen(Screen):
         raw_theme = self.query_one("#s-theme", Select).value
         self.cfg.setdefault("ui", {})["theme"] = self._normalize_theme(raw_theme)
         audition = self.query_one("#s-audition", Select).value
-        self.cfg.setdefault("ui", {})["auto_audition"] = audition
+        if audition is not None and str(audition) != "Select.NULL":
+            self.cfg.setdefault("ui", {})["auto_audition"] = audition
         save_config(self.cfg)
         self.dismiss(True)
 
