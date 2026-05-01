@@ -1442,6 +1442,8 @@ class CruxApp(App):
         self.render_kit()
         if self._import_path:
             self.run_import(self._import_path)
+        # Show welcome with stats once samples are loaded
+        self.set_status(f"✓ {self._stats['total']} samples loaded  ·  Ctrl+T to tag  ·  Ctrl+S for settings")
     
     @work
     async def load_stats(self):
