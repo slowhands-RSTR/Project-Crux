@@ -1265,14 +1265,7 @@ class CruxApp(App):
         Binding("7", "slot_7", "Slot 7"),
         Binding("8", "slot_8", "Slot 8"),
         Binding("9", "slot_9", "Slot 9"),
-        Binding("ctrl+1", "preview_1", "Preview 1"),
-        Binding("ctrl+2", "preview_2", "Preview 2"),
-        Binding("ctrl+3", "preview_3", "Preview 3"),
-        Binding("ctrl+4", "preview_4", "Preview 4"),
-        Binding("ctrl+5", "preview_5", "Preview 5"),
-        Binding("ctrl+6", "preview_6", "Preview 6"),
-        Binding("ctrl+7", "preview_7", "Preview 7"),
-        Binding("ctrl+8", "preview_8", "Preview 8"),
+
     ]
     
     def __init__(self, import_path=None):
@@ -1357,7 +1350,7 @@ class CruxApp(App):
                 id="content-area",
             ),
             Container(
-                Static("↑↓/jk · 1-8=slot · Ctrl+1-8=preview · Enter=add · P=play · space=lock · /=search · Tab=browse/kit · Ctrl+T=tag · Ctrl+S=settings"),
+                Static("↑↓/jk=navigate · 1-8=slots · Enter=play · P=play · space=lock · /=search · Tab=browse/kit · Ctrl+T=tag · Ctrl+S=settings"),
                 id="status-bar",
             ),
             id="main-container",
@@ -2288,21 +2281,6 @@ class CruxApp(App):
             slot_name = SLOT_NAMES[slot_idx] if slot_idx < len(SLOT_NAMES) else f"Slot {slot_idx+1}"
             self.set_status(f"{s['name']} → {slot_name}")
     
-    def _preview_slot(self, idx: int):
-        if idx < len(self._kit) and self._kit[idx]:
-            path = self._kit[idx].get("path", "")
-            if path and os.path.exists(path):
-                self._play_audio(path)
-                self.set_status(f"▶ {self._kit[idx]['name']}")
-    
-    def action_preview_1(self): self._preview_slot(0)
-    def action_preview_2(self): self._preview_slot(1)
-    def action_preview_3(self): self._preview_slot(2)
-    def action_preview_4(self): self._preview_slot(3)
-    def action_preview_5(self): self._preview_slot(4)
-    def action_preview_6(self): self._preview_slot(5)
-    def action_preview_7(self): self._preview_slot(6)
-    def action_preview_8(self): self._preview_slot(7)
     def action_slot_1(self): self._add_highlighted_to_slot(0)
     def action_slot_2(self): self._add_highlighted_to_slot(1)
     def action_slot_3(self): self._add_highlighted_to_slot(2)
