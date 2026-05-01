@@ -1888,7 +1888,8 @@ class CruxApp(App):
             path = sample.get("path", "")
         if sample:
             self._last_selected_id = sample.get("id")
-            if path and os.path.exists(path) and _config.get("ui",{}).get("auto_audition", True):
+            # Only auto-play on sample-list (kit-grid re-renders trigger false plays)
+            if lv.id == "sample-list" and path and os.path.exists(path) and _config.get("ui",{}).get("auto_audition", True):
                 self._play_audio(path)
         self._show_waveform(path, name, sample=sample)
         self.set_status(f"▶ {name}")
