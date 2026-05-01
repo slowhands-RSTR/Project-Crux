@@ -729,7 +729,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                     folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
                     batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
                 
-                user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- 'genres' MUST describe the ACTUAL genre from spectral data, not a default\n- Use BPM: <100bpm=hip-hop/ambient, 120-130=house, 130-150=techno, 160+=dnb\n- Use centroid: bright=house/pop, dark=techno/ambient, mid=hip-hop\n- Return EXACTLY {len(batch)} entries\n- Return ONLY JSON.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\",\"808\"], \"genres\": [\"techno\"], \"notes\": \"...\"}}]}}\n\nSamples:\n{batch_text}"}]}
+                user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- genres MUST describe the ACTUAL genre from spectral data, not a default\n- BPM clues: under 100=hip-hop/ambient, 120-130=house, 130-150=techno, over 160=dnb\n- Centroid clues: bright=house/pop, dark=techno/ambient, mid=hip-hop\n- Return EXACTLY {len(batch)} entries. Return ONLY raw JSON.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\"], \"genres\": [\"techno\"], \"notes\": \"...\"}}]}}\n\nSamples:\n{batch_text}"}]}
                 
                 resp = None
                 for attempt in range(3):
