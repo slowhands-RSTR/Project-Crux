@@ -1040,7 +1040,8 @@ class ExportScreen(Screen):
     
     CSS = """
     ExportScreen { background: #0b1a20; }
-    #export-wrap { width: 60; height: 100%; margin: 1 2; }
+    #e-formats { width: 100%; }
+    #export-wrap { width: 80%; height: 100%; margin: 1 2; }
     .ehdr { color: #1a9e9e; text-style: bold; height: 2; }
     .elbl { color: #b8c8c8; height: 2; }
     Button {
