@@ -352,16 +352,17 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
     if LLM_API_KEY:
         headers["Authorization"] = f"Bearer {LLM_API_KEY}"
     
+    import aiohttp
     for attempt in range(3):
         try:
-            resp = await asyncio.to_thread(
-                _requests_post,
-                LMSTUDIO_URL, headers=headers, json=body, timeout=120,
-            )
-            data = resp.json()
-            c = LLMAdapter.extract_content(data)
-            if c:
-                return c
+            connector = aiohttp.TCPConnector(force_close=True)
+            timeout_obj = aiohttp.ClientTimeout(total=120)
+            async with aiohttp.ClientSession(timeout=timeout_obj, connector=connector) as session:
+                async with session.post(LMSTUDIO_URL, headers=headers, json=body) as resp:
+                    data = await resp.json()
+                    c = LLMAdapter.extract_content(data)
+                    if c:
+                        return c
         except Exception as e:
             print(f"[llm] attempt {attempt+1}/3: {type(e).__name__}: {str(e)[:120]}", file=sys.stderr)
             import traceback
@@ -369,10 +370,6 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
         if attempt < 2:
             await asyncio.sleep(2)
     return None
-
-def _requests_post(url, headers, json, timeout):
-    import requests as _r
-    return _r.post(url, headers=headers, json=json, timeout=timeout)
 def extract_json(text: str):
     m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
     if m:
@@ -702,7 +699,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
     sys_msg = {"role": "system", "content": "You are crüx. Classify each sample by BPM, spectral centroid (bright/dark), and filename. Genres: techno (130-150bpm, dark), house (120-130bpm, warm), drum-and-bass (160-180bpm), hip-hop (80-100bpm), trap (130-160bpm), ambient (60-90bpm), breakbeat, electro, dub, pop, rock, jazz, funk, soul, garage, dubstep, idm, bass, downtempo, lo-fi. Return ONLY valid JSON."}
     
     tagged = 0
-    concurrency = 8
+    concurrency = min(4, os.cpu_count() or 4)  # Match local model slots
     sem = asyncio.Semaphore(concurrency)
     
 
