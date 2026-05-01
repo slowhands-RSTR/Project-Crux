@@ -1218,16 +1218,16 @@ class CruxApp(App):
     #import-log {{ height: 14; overflow-y: auto; background: $bg; border: solid $border; padding: 0 1; }}
     #import-log > Static {{ color: $fg; }}
     #sample-list, #kit-grid, #import-log {{
-        scrollbar-color: $muted;
-        scrollbar-color-hover: $dim;
-        scrollbar-background: $bg;
-        scrollbar-background-hover: $bg;
+        scrollbar-color: $dim;
+        scrollbar-color-hover: $accent;
+        scrollbar-background: $border;
+        scrollbar-background-hover: $border;
     }}
     ListView {{
-        scrollbar-color: $muted;
-        scrollbar-color-hover: $dim;
-        scrollbar-background: $bg;
-        scrollbar-background-hover: $bg;
+        scrollbar-color: $dim;
+        scrollbar-color-hover: $accent;
+        scrollbar-background: $border;
+        scrollbar-background-hover: $border;
     }}
     """
     
