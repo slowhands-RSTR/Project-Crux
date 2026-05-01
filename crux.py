@@ -675,7 +675,7 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
     return imported
 
 # ─── TUI Widgets & Screens ────────────────────────────────────────────────────
-async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=None, progress=None):
+async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=None, progress=None):
     """LLM-tag untagged samples: generate tags, genre, and ai_notes from spectral data.
     Uses 4 concurrent workers — one per LM Studio slot — for parallel tagging.
     Pauses between batches if pause_check() returns True.
@@ -699,7 +699,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
     sys_msg = {"role": "system", "content": "You are crüx. Classify each sample by BPM, spectral centroid (bright/dark), and filename. Genres: techno (130-150bpm, dark), house (120-130bpm, warm), drum-and-bass (160-180bpm), hip-hop (80-100bpm), trap (130-160bpm), ambient (60-90bpm), breakbeat, electro, dub, pop, rock, jazz, funk, soul, garage, dubstep, idm, bass, downtempo, lo-fi. Return ONLY valid JSON."}
     
     tagged = 0
-    concurrency = 8  # 4-8 for cloud, 4 for local
+    concurrency = 4  # Match local model slots (4)
     sem = asyncio.Semaphore(concurrency)
     
 
