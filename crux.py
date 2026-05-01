@@ -2084,8 +2084,7 @@ class CruxApp(App):
     
     def kit_refine(self, direction: str):
         if not direction.strip(): return
-        try:
-            # Detect if user is targeting specific slot(s) by name
+        # Detect if user is targeting specific slot(s) by name
         slot_name_map = {}
         for i, name in enumerate(SLOT_NAMES):
             slot_name_map[name.lower()] = i
@@ -2141,8 +2140,6 @@ class CruxApp(App):
         translated = " ".join(dir_map.get(w, w) for w in search_words)
         
         self.run_kit_refine(translated, target)
-        except Exception as e:
-            self.set_status(f"refine error: {str(e)[:60]}")
     
     @work(exclusive=True)
     async def run_kit_refine(self, direction: str, target_slots: list[int]):
