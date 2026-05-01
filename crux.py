@@ -601,20 +601,8 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
             return 0
         
         async with sem:
-            batch_text = ""
-            for s in batch:
-                feats = {
-                    "duration_ms": s.get("duration_ms", 0),
-                    "bpm": s.get("bpm"),
-                    "rms_db": s.get("rms_db"),
-                    "spectral_centroid_hz": s.get("spectral_centroid_hz"),
-                    "spectral_flatness": s.get("spectral_flatness"),
-                    "transient_score": s.get("transient_score"),
-                    "onset_confidence": s.get("onset_confidence"),
-                }
-                char = describe_audio(feats)
-                folder = os.path.basename(os.path.dirname(s.get("path",""))) if s.get("path") else ""
-                batch_text += f"{s['id']}: {s['name']} | {folder} | {s.get('machine') or ''} | {char}\n"
+            try:
+                batch_text = ""
             
             user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- Field names MUST be: id, tags, genres, sonics, notes\n- Do NOT use: category, type, style, description, instrument\n- 'id' must be EXACTLY the ID from each line below — copy it verbatim\n- 'genres' REQUIRED (min 1). If unsure: [\"house\"]\n- Return EXACTLY {len(batch)} entries\n- Return ONLY JSON. No markdown.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"house\"], \"sonics\": [\"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
             
@@ -734,6 +722,11 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                     if db.update_tags(sid, tags, genre=genre_str, notes=notes):
                         count += 1
             return count
+        except Exception as e:
+            print(f"[tag_batch] worker error: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            return 0
     
     # Process batches concurrently with pause support
     batch_idx = 0
