@@ -588,12 +588,13 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
     concurrency = 8
     sem = asyncio.Semaphore(concurrency)
     
-    # Shared HTTP session — avoids creating new connector per call
-    http_connector = aiohttp.TCPConnector(force_close=True, limit=0, limit_per_host=0)
-    http_timeout = aiohttp.ClientTimeout(total=120, connect=15)
-    http_headers = {"Content-Type": "application/json"}
+    # Single shared session for all workers — prevents connection pool fragmentation
+    _http_timeout = aiohttp.ClientTimeout(total=120, connect=15)
+    _http_connector = aiohttp.TCPConnector(force_close=True, limit=0, limit_per_host=0)
+    _http_headers = {"Content-Type": "application/json"}
     if LLM_API_KEY:
-        http_headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+        _http_headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+    _http_session = aiohttp.ClientSession(connector=_http_connector, timeout=_http_timeout, headers=_http_headers)
     
     async def _tag_batch(batch: list[dict]) -> int:
         nonlocal tagged
@@ -619,10 +620,9 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
                 
                 user_msg = {"role": "user", "content": f"Tag these {len(batch)} samples.\n\nRULES:\n- Field names MUST be: id, tags, genres, sonics, notes\n- Do NOT use: category, type, style, description, instrument\n- 'id' must be EXACTLY the ID from each line below — copy it verbatim\n- 'genres' REQUIRED (min 1). If unsure: [\"house\"]\n- Return EXACTLY {len(batch)} entries\n- Return ONLY JSON. No markdown.\n\nFormat: {{\"samples\": [{{\"id\": \"...\", \"tags\": [\"kick\", \"808\"], \"genres\": [\"house\"], \"sonics\": [\"punchy\"], \"notes\": \"Description\"}}]}}\n\nSamples:\n{batch_text}"}
                 
-                async with aiohttp.ClientSession(connector=http_connector, timeout=http_timeout, headers=http_headers) as http_session:
-                    for attempt in range(3):
-                        try:
-                            async with http_session.post(LMSTUDIO_URL, json={
+                for attempt in range(3):
+                    try:
+                        async with _http_session.post(LMSTUDIO_URL, json={
                                 "model": LMSTUDIO_MODEL,
                                 "messages": [sys_msg, user_msg],
                                 "stream": False,
@@ -748,6 +748,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
         if app_ref:
             app_ref.post_message(StatusMsg(msg))
     
+    await _http_session.close()
     return tagged
 
 class StatusMsg(Message):
