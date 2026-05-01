@@ -579,7 +579,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
     sys_msg = {"role": "system", "content": "You are crüx. Tags describe the sample. Genres REQUIRED (min 1, default ['house']). Return EXACTLY {len(batch)} entries. ONLY raw JSON — no markdown."}
     
     tagged = 0
-    concurrency = 4
+    concurrency = 8
     sem = asyncio.Semaphore(concurrency)
     
     async def _tag_batch(batch: list[dict]) -> int:
