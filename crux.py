@@ -1104,11 +1104,12 @@ class CruxApp(App):
     #prompt-input {{
         background: $bg;
         color: $fg;
-        border: solid $border;
+        border: none;
+        border-bottom: solid $border;
         padding: 0 1;
     }}
     #prompt-input:focus {{
-        border: solid $accent;
+        border-bottom: solid $accent;
     }}
     #content-area {{
         height: 100%;
