@@ -746,7 +746,20 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
                     if attempt < 2:
                         await asyncio.sleep(2)
                 if not resp:
-                    return 0
+                    # Fallback: try each sample individually
+                    count = 0
+                    for fb in batch:
+                        fb_msg = {"role": "user", "content": f"Tag this 1 sample. Return JSON: {{\"samples\": [{{\"id\": \"{fb['id']}\", \"tags\": [\"sample\"], \"genres\": [\"house\"]}}]}}\n\n{fb['id']}: {fb['name']}"}
+                        for _ in range(2):
+                            fb_resp = await llm_chat([sys_msg, fb_msg], temperature=0.2, max_tokens=200)
+                            if fb_resp:
+                                break
+                        if fb_resp:
+                            for e in LLMAdapter.tag_response(fb_resp, [fb]):
+                                if e["id"]:
+                                    db.update_tags(e["id"], e["tags"], genre=e["genre"], notes=e["notes"] or "tagged")
+                                    count += 1
+                    return count
                 
                 count = 0
                 for entry in LLMAdapter.tag_response(resp, batch):
