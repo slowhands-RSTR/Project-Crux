@@ -556,7 +556,7 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
     return imported
 
 # ─── TUI Widgets & Screens ────────────────────────────────────────────────────
-async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=None, progress=None):
+async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=None, progress=None):
     """LLM-tag untagged samples: generate tags, genre, and ai_notes from spectral data.
     Uses 4 concurrent workers — one per LM Studio slot — for parallel tagging.
     Pauses between batches if pause_check() returns True.
@@ -577,7 +577,7 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
     # Chunk into batches
     batches = [untagged[i:i + batch_size] for i in range(0, total, batch_size)]
     
-    sys_msg = {"role": "system", "content": "You are crüx, a sample tagging engine. RULES:\n- 'tags': instrument type + sonic character (kick, 808, snare, clap, hat, dark, punchy, lofi, bright, warm, dirty, clean, boomy, tight, gritty, airy)\n- 'genres': REQUIRED for EVERY sample. Minimum 1 genre. If uncertain, default to ['house'].\n- Use filename as primary instrument indicator\n- Return EXACTLY {len(batch)} entries\n- Return ONLY raw JSON. No markdown, no backticks, no code blocks, no explanations."}
+    sys_msg = {"role": "system", "content": "You are crüx. Tags describe the sample. Genres REQUIRED (min 1, default ['house']). Return EXACTLY {len(batch)} entries. ONLY raw JSON — no markdown."}
     
     tagged = 0
     concurrency = 4
@@ -610,7 +610,7 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
             for attempt in range(2):
                 try:
                     resp = await asyncio.wait_for(
-                        llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000),
+                        llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=1000),
                         timeout=120)
                     if resp:
                         break
