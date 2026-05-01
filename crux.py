@@ -216,46 +216,51 @@ class DB:
         if self.conn: self.conn.close()
 
 # ─── LLM Helper ──────────────────────────────────────────────────────────────
-import aiohttp
 async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
                    override_url=None, override_model=None, override_key=None) -> Optional[str]:
+    """Call LLM via curl subprocess — avoids C extension segfaults on macOS Python 3.9."""
     url = override_url or LMSTUDIO_URL
     model = override_model or LMSTUDIO_MODEL
     api_key = override_key or LLM_API_KEY
     
+    body = json.dumps({
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": False,
+    })
+    
     for attempt in range(3):
         try:
-            timeout = aiohttp.ClientTimeout(total=120, connect=15)
-            headers = {"Content-Type": "application/json"}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-            connector = aiohttp.TCPConnector(force_close=True)
-            async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
-                async with session.post(url, json={
-                    "model": model,
-                    "messages": messages,
-                    "stream": False,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                }) as resp:
-                    data = await resp.json()
-                    msg = data["choices"][0]["message"]
-                    # Some models (qwen with thinking mode) put output in reasoning_content
-                    c = (msg.get("content") or "").strip()
-                    if not c:
-                        c = (msg.get("reasoning_content") or "").strip()
+            proc = await asyncio.create_subprocess_exec(
+                "curl", "-s", "--max-time", "60",
+                "-H", "Content-Type: application/json",
+                *(["-H", f"Authorization: Bearer {api_key}"] if api_key else []),
+                "-d", body,
+                url,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=65)
+            data = json.loads(stdout.decode())
+            c = (data["choices"][0]["message"].get("content") or "").strip()
+            if not c:
+                c = (data["choices"][0]["message"].get("reasoning_content") or "").strip()
+            if c:
                 # Strip thinking boilerplate
                 if c.startswith("Thinking") and "\n\n" in c:
                     after = c.split("\n\n", 1)[-1].strip()
                     if after:
                         c = after
-                return c or None
+                return c
+        except asyncio.TimeoutError:
+            print(f"[llm] attempt {attempt+1}/3: timeout", file=sys.stderr)
         except Exception as e:
-            print(f"[llm_chat] attempt {attempt+1}/3 failed: {e}", file=sys.stderr)
-            if attempt < 2:
-                await asyncio.sleep(2)
-            else:
-                return None
+            print(f"[llm] attempt {attempt+1}/3: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+        if attempt < 2:
+            await asyncio.sleep(2)
+    return None
 def extract_json(text: str):
     m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
     if m:
