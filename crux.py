@@ -1933,6 +1933,16 @@ class CruxApp(App):
                 if s:
                     self._kit[idx] = s
                     assigned += 1
+                elif idx < len(SLOT_NAMES):
+                    # Fallback: search for any sample matching the slot type
+                    slot_name = SLOT_NAMES[idx].lower()
+                    cur = self.db.conn.execute(
+                        "SELECT * FROM samples WHERE tags LIKE ? OR name LIKE ? LIMIT 1",
+                        (f"%{slot_name}%", f"%{slot_name}%"))
+                    row = cur.fetchone()
+                    if row:
+                        self._kit[idx] = self.db._parse_row(row)
+                        assigned += 1
             self.render_kit()
             self.set_status(f"built \"{name}\" ({assigned}/{KIT_SLOTS} slots)")
             # Restore samples in browse pane after LLM completes
