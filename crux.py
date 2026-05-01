@@ -231,22 +231,30 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
     base = LMSTUDIO_URL.rsplit("/v1/chat/completions", 1)[0].rsplit("/v1", 1)[0] + "/v1"
     client = OpenAI(api_key=LLM_API_KEY or "not-needed", base_url=base, max_retries=3, timeout=30.0)
     
-    try:
-        resp = await asyncio.to_thread(
-            client.chat.completions.create,
-            model=LMSTUDIO_MODEL,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"} if json_mode else None,
-        )
-        c = (resp.choices[0].message.content or "").strip()
-        if not c:
-            c = (resp.choices[0].message.get("reasoning_content") or "").strip()
-        return c or None
-    except Exception as e:
-        print(f"[llm] {type(e).__name__}: {str(e)[:100]}", file=sys.stderr)
-        return None
+    for attempt in range(3):
+        try:
+            resp = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=LMSTUDIO_MODEL,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_format={"type": "json_object"} if json_mode else None,
+                ),
+                timeout=35,
+            )
+            c = (resp.choices[0].message.content or "").strip()
+            if not c:
+                c = (resp.choices[0].message.get("reasoning_content") or "").strip()
+            return c or None
+        except asyncio.TimeoutError:
+            print(f"[llm] attempt {attempt+1}/3: timeout", file=sys.stderr)
+        except Exception as e:
+            print(f"[llm] attempt {attempt+1}/3: {type(e).__name__}: {str(e)[:80]}", file=sys.stderr)
+        if attempt < 2:
+            await asyncio.sleep(2)
+    return None
 def extract_json(text: str):
     m = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
     if m:
