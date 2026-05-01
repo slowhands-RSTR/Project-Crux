@@ -699,7 +699,7 @@ async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=N
     sys_msg = {"role": "system", "content": "You are crüx. Classify each sample by BPM, spectral centroid (bright/dark), and filename. Genres: techno (130-150bpm, dark), house (120-130bpm, warm), drum-and-bass (160-180bpm), hip-hop (80-100bpm), trap (130-160bpm), ambient (60-90bpm), breakbeat, electro, dub, pop, rock, jazz, funk, soul, garage, dubstep, idm, bass, downtempo, lo-fi. Return ONLY valid JSON."}
     
     tagged = 0
-    concurrency = min(4, os.cpu_count() or 4)  # Match local model slots
+    concurrency = 8  # 4-8 for cloud, 4 for local
     sem = asyncio.Semaphore(concurrency)
     
 
