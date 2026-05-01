@@ -13,6 +13,9 @@ Usage:
 
 import sys, os, sqlite3, re, json, subprocess, time, asyncio, uuid, concurrent.futures
 
+# Debug log path — set once, used everywhere
+__log_path = os.path.expanduser("~/.crux_debug.log")
+
 # Python version check — 3.9 segfaults on macOS with async HTTP
 if sys.version_info < (3, 10):
     print("crüx requires Python 3.10+", file=sys.stderr)
@@ -363,13 +366,13 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
                     c = LLMAdapter.extract_content(data)
                     if c:
                         return c
-                    with open("/tmp/crux_debug.log", "a") as f:
+                    with open(__log_path, "a") as f:
                         f.write(f"llm: attempt {attempt+1} empty content: {str(data)[:100]}\n")
         except asyncio.TimeoutError:
-            with open("/tmp/crux_debug.log", "a") as f:
+            with open(__log_path, "a") as f:
                 f.write(f"llm: attempt {attempt+1} timeout\n")
         except Exception as e:
-            with open("/tmp/crux_debug.log", "a") as f:
+            with open(__log_path, "a") as f:
                 f.write(f"llm: attempt {attempt+1} {type(e).__name__}: {str(e)[:100]}\n")
             import traceback
             traceback.print_exc()
@@ -688,6 +691,10 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
     progress: optional mutable list [tagged_so_far, total] for live spinner updates.
     """
     if not db.conn: db.connect()
+    import __main__ as _mm
+    _mm._debug_file = os.path.expanduser("~/.crux_debug.log")
+    with open(_mm._debug_file, "a") as _f:
+        _f.write(f"tag_pipeline STARTED\n")
     cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]'  ORDER BY RANDOM()")
     untagged = [db._parse_row(r) for r in cur.fetchall()]
     total = len(untagged)
@@ -743,7 +750,7 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
                     if attempt < 2:
                         await asyncio.sleep(2)
                 if not resp:
-                    with open("/tmp/crux_debug.log", "a") as __f:
+                    with open(__log_path, "a") as __f:
                         __f.write(f"MAIN LLM FAILED for batch of {len(batch)}, trying fallback\n")
                     fallback_count = 0
                     for fb_sample in batch:
@@ -758,26 +765,26 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
                                     db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged")
                                     fallback_count += 1
                         else:
-                            with open("/tmp/crux_debug.log", "a") as __f:
+                            with open(__log_path, "a") as __f:
                                 __f.write(f"  fallback failed for {fb_sample['name'][:20]}\n")
-                    with open("/tmp/crux_debug.log", "a") as __f:
+                    with open(__log_path, "a") as __f:
                         __f.write(f"fallback wrote {fallback_count}\n")
                     return fallback_count
                 
                 count = 0
                 parsed = LLMAdapter.tag_response(resp, batch)
-                with open("/tmp/crux_debug.log", "a") as f:
+                with open(__log_path, "a") as f:
                     f.write(f"resp={len(resp)}c parsed={len(parsed)} batch={len(batch)}\n")
                 for entry in parsed:
                     if entry["id"]:
                         rc = db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged")
                         if rc:
                             count += 1
-                with open("/tmp/crux_debug.log", "a") as f:
+                with open(__log_path, "a") as f:
                     f.write(f"written={count}/{len(parsed)} sid={entry['id'][:20] if entry['id'] else 'none'}\n")
                 return count
             except Exception as e:
-                with open("/tmp/crux_debug.log", "a") as f:
+                with open(__log_path, "a") as f:
                     f.write(f"ERROR: {type(e).__name__}: {e}\n")
                 import traceback
                 traceback.print_exc()
