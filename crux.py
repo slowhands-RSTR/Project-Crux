@@ -227,8 +227,7 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
-        connector = aiohttp.TCPConnector(force_close=True, limit=0)
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as session:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             async with session.post(url, json={
                 "model": model,
                 "messages": messages,
@@ -556,7 +555,7 @@ async def import_pipeline(folder: str, db: DB, app_ref=None):
     return imported
 
 # ─── TUI Widgets & Screens ────────────────────────────────────────────────────
-async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=None, progress=None):
+async def tag_pipeline(db: DB, batch_size: int = 20, app_ref=None, pause_check=None, progress=None):
     """LLM-tag untagged samples: generate tags, genre, and ai_notes from spectral data.
     Uses 4 concurrent workers — one per LM Studio slot — for parallel tagging.
     Pauses between batches if pause_check() returns True.
