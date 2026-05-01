@@ -815,8 +815,8 @@ class SettingsScreen(Screen):
     BINDINGS = [
         Binding("escape", "close_settings", "Close"),
         Binding("ctrl+s", "save", "Save", priority=True),
-        Binding("tab", "focus_next", "Next", show=False),
-        Binding("shift+tab", "focus_previous", "Previous", show=False),
+        Binding("tab", "focus_next", "Next", show=False, priority=True),
+        Binding("shift+tab", "focus_previous", "Previous", show=False, priority=True),
     ]
     
     def action_close_settings(self):
@@ -1032,8 +1032,8 @@ class ExportScreen(Screen):
     
     BINDINGS = [
         Binding("escape", "close", "Close"),
-        Binding("tab", "focus_next", "Next", show=False),
-        Binding("shift+tab", "focus_previous", "Previous", show=False),
+        Binding("tab", "focus_next", "Next", show=False, priority=True),
+        Binding("shift+tab", "focus_previous", "Previous", show=False, priority=True),
     ]
     
     CSS = """
