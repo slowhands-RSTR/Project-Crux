@@ -225,7 +225,7 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
     
     for attempt in range(3):
         try:
-            timeout = aiohttp.ClientTimeout(total=120)
+            timeout = aiohttp.ClientTimeout(total=120, connect=15)
             headers = {"Content-Type": "application/json"}
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
