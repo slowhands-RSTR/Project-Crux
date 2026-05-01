@@ -743,7 +743,8 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
                     if attempt < 2:
                         await asyncio.sleep(2)
                 if not resp:
-                    # Fallback: try each sample individually
+                    with open("/tmp/crux_debug.log", "a") as __f:
+                        __f.write(f"MAIN LLM FAILED for batch of {len(batch)}, trying fallback\n")
                     fallback_count = 0
                     for fb_sample in batch:
                         fb_msg = {"role": "user", "content": f"Tag this 1 sample.\n\n{{\"samples\": [{{\"id\": \"{fb_sample['id']}\", \"tags\": [\"sample\"], \"genres\": [\"house\"]}}]}}\n\n{fb_sample['id']}: {fb_sample['name']}"}
@@ -756,6 +757,11 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
                                 if entry["id"]:
                                     db.update_tags(entry["id"], entry["tags"], genre=entry["genre"], notes=entry["notes"] or "tagged")
                                     fallback_count += 1
+                        else:
+                            with open("/tmp/crux_debug.log", "a") as __f:
+                                __f.write(f"  fallback failed for {fb_sample['name'][:20]}\n")
+                    with open("/tmp/crux_debug.log", "a") as __f:
+                        __f.write(f"fallback wrote {fallback_count}\n")
                     return fallback_count
                 
                 count = 0
