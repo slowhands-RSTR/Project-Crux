@@ -794,7 +794,10 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
             progress[0] = tagged
         batch_idx += concurrency
         
-        msg = f"tagged {tagged}/{total}"
+        remaining = total - tagged
+        batch_time = timeout  # approx seconds per batch
+        eta_min = int(remaining * batch_time / batch_size / concurrency / 60) + 1
+        msg = f"tagged {tagged}/{total}  ~{eta_min}m remaining"
         if app_ref:
             app_ref.post_message(StatusMsg(msg))
     
