@@ -1810,10 +1810,10 @@ class CruxApp(App):
             self.render_kit()
             self.set_status(f"built \"{name}\" ({assigned}/{KIT_SLOTS} slots)")
             # Restore samples in browse pane after LLM completes
-            self.search(self._query)
+            self.search("")
         else:
             self.set_status(j.get("message", "ok"))
-            self.search(self._query)
+            self.search("")
     
     # ─── Kit ─────────────────────────────────────────────────────────────────
     def _show_waveform(self, path: str, name: str, sample: Optional[dict] = None):
