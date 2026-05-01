@@ -223,7 +223,7 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
     model = override_model or LMSTUDIO_MODEL
     api_key = override_key or LLM_API_KEY
     try:
-        timeout = aiohttp.ClientTimeout(total=60)
+        timeout = aiohttp.ClientTimeout(total=120)
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -611,7 +611,7 @@ async def tag_pipeline(db: DB, batch_size: int = 12, app_ref=None, pause_check=N
                 try:
                     resp = await asyncio.wait_for(
                         llm_chat([sys_msg, user_msg], temperature=0.2, max_tokens=2000),
-                        timeout=90)
+                        timeout=120)
                     if resp:
                         break
                 except (asyncio.TimeoutError, Exception):
