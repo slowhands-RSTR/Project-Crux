@@ -356,7 +356,7 @@ async def llm_chat(messages: list[dict], temperature=0.1, max_tokens=2000,
         try:
             resp = await asyncio.to_thread(
                 _requests_post,
-                LMSTUDIO_URL, headers=headers, json=body, timeout=30,
+                LMSTUDIO_URL, headers=headers, json=body, timeout=60,
             )
             data = resp.json()
             c = LLMAdapter.extract_content(data)
@@ -981,7 +981,7 @@ class SettingsScreen(Screen):
                 _r.post, url,
                 headers=headers,
                 json={"model": model, "messages": [{"role": "user", "content": "Say ok"}], "max_tokens": 5},
-                timeout=10,
+                timeout=30,
             )
             data = resp.json()
             text = (data["choices"][0]["message"].get("content") or "").strip()
