@@ -690,11 +690,9 @@ async def tag_pipeline(db: DB, batch_size: int = 8, app_ref=None, pause_check=No
     Pauses between batches if pause_check() returns True.
     progress: optional mutable list [tagged_so_far, total] for live spinner updates.
     """
+    with open(__log_path, "a") as _f:
+        _f.write(f"tag_pipeline STARTED at {datetime.now()}\n")
     if not db.conn: db.connect()
-    import __main__ as _mm
-    _mm._debug_file = os.path.expanduser("~/.crux_debug.log")
-    with open(_mm._debug_file, "a") as _f:
-        _f.write(f"tag_pipeline STARTED\n")
     cur = db.conn.execute("SELECT * FROM samples WHERE tags IS NULL OR tags = '[]'  ORDER BY RANDOM()")
     untagged = [db._parse_row(r) for r in cur.fetchall()]
     total = len(untagged)
